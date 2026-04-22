@@ -1,10 +1,12 @@
 import express from 'express';
-import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject } from '../controllers/projectController';
+import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers } from '../controllers/projectController';
 
 const router = express.Router();
 
 router.route('/').post(createProject).get(getProjects);
 router.route('/:id').get(getProjectDetails).put(updateProject);
+router.post('/:id/invite', inviteMember);
+router.get('/:id/members', getProjectMembers);
 router.get('/:id/keys', getProjectKeys);
 router.post('/:id/keys', createNewKey);
 

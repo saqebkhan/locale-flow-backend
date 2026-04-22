@@ -1,8 +1,12 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import Project from '../models/Project';
+import User from '../models/User';
+import Invitation from '../models/Invitation';
+import ProjectMember from '../models/ProjectMember';
 import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
 import { generateApiKey } from '../services/apiKey.service';
+import crypto from 'crypto';
 
 export const createProject = async (req: AuthRequest, res: Response) => {
   const { name, description, defaultLanguage } = req.body;
@@ -55,4 +59,31 @@ export const updateProject = async (req: AuthRequest, res: Response) => {
   const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
   if (!project) return res.status(404).json({ message: 'Project not found' });
   res.json(project);
+};
+
+export const inviteMember = async (req: AuthRequest, res: Response) => {
+  const { email, role } = req.body;
+  const projectId = req.params.id;
+
+  // Check if already a member
+  const existingMember = await ProjectMember.findOne({ projectId, userId: (await User.findOne({ email }))?._id });
+  if (existingMember) return res.status(400).json({ message: 'User is already a member' });
+
+  // Create invitation
+  const token = crypto.randomBytes(32).toString('hex');
+  const invitation = await Invitation.create({
+    projectId,
+    email,
+    role,
+    invitedBy: req.user!._id,
+    token
+  });
+
+  // In a real app, send email here. For now, just return success.
+  res.status(201).json({ message: 'Invitation sent', invitation });
+};
+
+export const getProjectMembers = async (req: AuthRequest, res: Response) => {
+  const members = await ProjectMember.find({ projectId: req.params.id }).populate('userId', 'email name');
+  res.json(members);
 };
