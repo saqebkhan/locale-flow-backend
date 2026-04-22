@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { ApiKeyRequest } from '../middleware/apiKeyAuth';
 import { getTranslationsWithFallback } from '../services/translation.service';
 import TranslationSnapshot from '../models/TranslationSnapshot';
+import Project from '../models/Project';
 import { logQueue } from '../queues/logQueue';
 
 export const fetchTranslations = async (req: ApiKeyRequest, res: Response) => {
@@ -25,6 +26,13 @@ export const fetchTranslations = async (req: ApiKeyRequest, res: Response) => {
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
+};
+
+export const getProjectConfig = async (req: ApiKeyRequest, res: Response) => {
+  const { projectId } = req.apiKey;
+  const project = await Project.findById(projectId).select('name languages defaultLanguage');
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+  res.json(project);
 };
 
 export const reportMissingKeys = async (req: ApiKeyRequest, res: Response) => {
