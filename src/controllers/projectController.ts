@@ -44,3 +44,15 @@ export const createNewKey = async (req: AuthRequest, res: Response) => {
   );
   res.status(201).json({ rawKey, apiKey });
 };
+
+export const getProjectDetails = async (req: AuthRequest, res: Response) => {
+  const project = await Project.findById(req.params.id);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+  res.json(project);
+};
+
+export const updateProject = async (req: AuthRequest, res: Response) => {
+  const project = await Project.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+  res.json(project);
+};
