@@ -27,6 +27,39 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
   res.status(204).send();
 };
 
+export const updateTranslation = async (req: AuthRequest, res: Response) => {
+  const { value } = req.body;
+  const translation = await Translation.findByIdAndUpdate(
+    req.params.id,
+    { value, updatedBy: req.user!._id },
+    { new: true }
+  );
+  if (!translation) return res.status(404).json({ message: 'Translation not found' });
+  res.json(translation);
+};
+
+export const updateKey = async (req: AuthRequest, res: Response) => {
+  const { projectId, oldKey } = req.params;
+  const { newKey } = req.body;
+  
+  if (!newKey) return res.status(400).json({ message: 'New key name is required' });
+
+  const result = await Translation.updateMany(
+    { projectId, key: oldKey },
+    { key: newKey, updatedBy: req.user!._id }
+  );
+
+  res.json({ message: `Updated ${result.modifiedCount} translations`, modifiedCount: result.modifiedCount });
+};
+
+export const deleteKey = async (req: AuthRequest, res: Response) => {
+  const { projectId, key } = req.params;
+  
+  const result = await Translation.deleteMany({ projectId, key });
+
+  res.json({ message: `Deleted ${result.deletedCount} translations`, deletedCount: result.deletedCount });
+};
+
 export const createSnapshotHandler = async (req: AuthRequest, res: Response) => {
   const { projectId, version } = req.body;
   try {
