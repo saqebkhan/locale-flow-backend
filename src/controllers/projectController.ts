@@ -109,3 +109,28 @@ export const getProjectMembers = async (req: AuthRequest, res: Response) => {
   const members = await ProjectMember.find({ projectId: req.params.id }).populate('userId', 'email name');
   res.json(members);
 };
+
+export const acceptInvitation = async (req: AuthRequest, res: Response) => {
+  const { token } = req.params;
+  const invitation = await Invitation.findOne({ token, status: 'PENDING' });
+
+  if (!invitation) {
+    return res.status(404).json({ message: 'Invitation not found or already processed' });
+  }
+
+  // Ensure the logged-in user matches the invited email (optional but recommended)
+  // if (invitation.email !== req.user!.email) { ... }
+
+  // Create project membership
+  await ProjectMember.create({
+    projectId: invitation.projectId,
+    userId: req.user!._id,
+    role: invitation.role
+  });
+
+  // Update invitation status
+  invitation.status = 'ACCEPTED';
+  await invitation.save();
+
+  res.json({ message: 'Invitation accepted', projectId: invitation.projectId });
+};
