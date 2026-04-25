@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import Translation from '../models/Translation';
 import { createSnapshot, rollbackToVersion } from '../services/versioning.service';
+import { translateText } from '../services/ai.service';
 
 export const createTranslation = async (req: AuthRequest, res: Response) => {
   const { projectId, language, namespace, key, value } = req.body;
@@ -75,6 +76,21 @@ export const rollbackHandler = async (req: AuthRequest, res: Response) => {
   try {
     const result = await rollbackToVersion(projectId, version, req.user!._id as string);
     res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+export const aiTranslate = async (req: AuthRequest, res: Response) => {
+  const { text, targetLanguages, sourceLanguage } = req.body;
+  
+  if (!text || !targetLanguages || !Array.isArray(targetLanguages)) {
+    return res.status(400).json({ message: 'Invalid request: text and targetLanguages array are required' });
+  }
+
+  try {
+    const translations = await translateText(text, targetLanguages, sourceLanguage);
+    res.json(translations);
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }

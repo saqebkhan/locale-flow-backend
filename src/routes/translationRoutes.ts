@@ -7,7 +7,8 @@ import {
   updateKey,
   deleteKey,
   createSnapshotHandler, 
-  rollbackHandler 
+  rollbackHandler,
+  aiTranslate
 } from '../controllers/translationController';
 
 const router = express.Router();
@@ -20,5 +21,6 @@ router.put('/project/:projectId/key/:oldKey', updateKey);
 router.delete('/project/:projectId/key/:key', deleteKey);
 router.post('/snapshot', createSnapshotHandler);
 router.post('/rollback', rollbackHandler);
+router.post('/ai-translate', aiTranslate);
 
 export default router;
