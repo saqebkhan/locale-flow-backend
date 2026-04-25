@@ -11,6 +11,7 @@ import {
   aiTranslate,
   restoreTranslation,
   approveTranslation,
+  rejectTranslation,
   bulkUpload
 } from '../controllers/translationController';
 
@@ -27,6 +28,7 @@ router.post('/rollback', rollbackHandler);
 router.post('/ai-translate', aiTranslate);
 router.post('/:id/restore', restoreTranslation);
 router.post('/:id/approve', approveTranslation);
+router.post('/:id/reject', rejectTranslation);
 router.post('/bulk-upload', bulkUpload);
 
 export default router;

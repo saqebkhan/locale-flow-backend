@@ -15,13 +15,21 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
   const project = await Project.findById(projectId);
   
   if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
-    // Owner is always an ADMIN if not explicitly in membership
     membership = { role: 'OWNER' } as any;
   }
 
   if (!membership) return res.status(403).json({ message: 'Forbidden' });
 
-  let status = providedStatus || (environment === 'PROD' && membership.role !== 'OWNER' && membership.role !== 'ADMIN' ? 'PENDING_APPROVAL' : 'APPROVED');
+  // 1. VIEWER Restriction
+  if (membership.role === 'VIEWER') {
+    return res.status(403).json({ message: 'Viewers cannot modify translations' });
+  }
+
+  // 2. PROD Governance for EDITOR
+  let status = providedStatus || 'APPROVED';
+  if (environment === 'PROD' && membership.role === 'EDITOR') {
+    status = 'PENDING_APPROVAL';
+  }
 
   const translation = await Translation.findOneAndUpdate(
     { projectId, language, namespace, key, environment },
@@ -57,6 +65,19 @@ export const getTranslationsForProject = async (req: AuthRequest, res: Response)
 };
 
 export const deleteTranslation = async (req: AuthRequest, res: Response) => {
+  const translation = await Translation.findById(req.params.id);
+  if (!translation) return res.status(404).json({ message: 'Not found' });
+
+  const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
+  if (!membership || membership.role === 'VIEWER') {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  // Editors cannot delete PROD translations directly
+  if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Only Admins can delete from Production. Please contact an Admin.' });
+  }
+
   // Soft delete for Undo functionality
   await Translation.findByIdAndUpdate(req.params.id, { isArchived: true });
   res.status(204).send();
@@ -69,13 +90,34 @@ export const restoreTranslation = async (req: AuthRequest, res: Response) => {
 
 export const updateTranslation = async (req: AuthRequest, res: Response) => {
   const { value } = req.body;
-  const translation = await Translation.findByIdAndUpdate(
+  const translation = await Translation.findById(req.params.id);
+  if (!translation) return res.status(404).json({ message: 'Translation not found' });
+
+  const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
+  if (!membership || membership.role === 'VIEWER') {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
+
+  // If Editor edits PROD, it goes back to PENDING_APPROVAL
+  let status = translation.status;
+  if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    status = 'PENDING_APPROVAL';
+    
+    // Trigger email
+    const project = await Project.findById(translation.projectId);
+    const owner = await ProjectMember.findOne({ projectId: translation.projectId, role: 'OWNER' }).populate('userId');
+    if (owner && (owner.userId as any).email) {
+      await sendApprovalEmail((owner.userId as any).email, project, { ...translation.toObject(), value });
+    }
+  }
+
+  const updated = await Translation.findByIdAndUpdate(
     req.params.id,
-    { value, updatedBy: req.user!._id },
+    { value, status, updatedBy: req.user!._id },
     { new: true }
   );
-  if (!translation) return res.status(404).json({ message: 'Translation not found' });
-  res.json(translation);
+
+  res.json(updated);
 };
 
 export const updateKey = async (req: AuthRequest, res: Response) => {
@@ -83,6 +125,11 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
   const { newKey } = req.body;
   
   if (!newKey) return res.status(400).json({ message: 'New key name is required' });
+
+  const membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  if (!membership || membership.role === 'VIEWER') {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
 
   const result = await Translation.updateMany(
     { projectId, key: oldKey },
@@ -94,6 +141,11 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
 
 export const deleteKey = async (req: AuthRequest, res: Response) => {
   const { projectId, key } = req.params;
+
+  const membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  if (!membership || membership.role === 'VIEWER') {
+    return res.status(403).json({ message: 'Forbidden' });
+  }
   
   const result = await Translation.deleteMany({ projectId, key });
 
@@ -136,13 +188,33 @@ export const aiTranslate = async (req: AuthRequest, res: Response) => {
 };
 
 export const approveTranslation = async (req: AuthRequest, res: Response) => {
-  const translation = await Translation.findByIdAndUpdate(
-    req.params.id,
-    { status: 'APPROVED', updatedBy: req.user!._id },
-    { new: true }
-  );
-  if (!translation) return res.status(404).json({ message: 'Translation not found' });
+  const translation = await Translation.findById(req.params.id);
+  if (!translation) return res.status(404).json({ message: 'Not found' });
+
+  const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
+  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Only Admins can approve' });
+  }
+
+  translation.status = 'APPROVED';
+  translation.updatedBy = req.user!._id;
+  await translation.save();
   res.json(translation);
+};
+
+export const rejectTranslation = async (req: AuthRequest, res: Response) => {
+  const translation = await Translation.findById(req.params.id);
+  if (!translation) return res.status(404).json({ message: 'Not found' });
+
+  const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
+  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Only Admins can reject' });
+  }
+
+  translation.status = 'REJECTED';
+  translation.updatedBy = req.user!._id;
+  await translation.save();
+  res.json({ message: 'Translation rejected' });
 };
 
 export const bulkUpload = async (req: AuthRequest, res: Response) => {
