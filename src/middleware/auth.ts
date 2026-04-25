@@ -12,7 +12,13 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
     try {
       token = req.headers.authorization.split(' ')[1];
       const decoded: any = jwt.verify(token, process.env.JWT_SECRET || 'secret');
-      req.user = await User.findById(decoded.id).select('-password') as IUser;
+      const user = await User.findById(decoded.id).select('-password');
+      
+      if (!user) {
+        return res.status(401).json({ message: 'Not authorized, user not found' });
+      }
+      
+      req.user = user as IUser;
       next();
     } catch (error) {
       res.status(401).json({ message: 'Not authorized, token failed' });

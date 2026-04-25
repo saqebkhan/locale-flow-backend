@@ -26,6 +26,10 @@ const getResend = () => {
 const FROM_EMAIL = process.env.SMTP_USER || 'onboarding@resend.dev';
 
 export const sendApprovalEmail = async (adminEmail: string, projectDetail: any, translation: any) => {
+  if (!projectDetail?._id || !translation?._id) {
+    console.error('Missing project or translation detail for email');
+    return;
+  }
   const approvalLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/projects/${projectDetail._id}?approve=${translation._id}`;
   const html = `
     <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px; max-width: 600px;">

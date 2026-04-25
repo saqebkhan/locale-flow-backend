@@ -16,6 +16,10 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ message: 'Project ID, Key, and Language are required' });
     }
 
+    if (!req.user) {
+      return res.status(401).json({ message: 'Unauthorized: No user found' });
+    }
+
     // RBAC Check
     let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
     const project = await Project.findById(projectId);
@@ -49,9 +53,9 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
     }
 
     // Handle Approval Email (Non-blocking)
-    if (status === 'PENDING_APPROVAL') {
+    if (status === 'PENDING_APPROVAL' && project) {
       try {
-        const ownerUser = await User.findById(project?.owner);
+        const ownerUser = await User.findById(project.owner);
         if (ownerUser?.email) {
           sendApprovalEmail(ownerUser.email, project, translation).catch(e => console.error('Email failed:', e));
         }
