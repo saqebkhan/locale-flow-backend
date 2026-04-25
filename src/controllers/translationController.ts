@@ -11,7 +11,14 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
   const { projectId, language, namespace, key, value, environment = 'DEV', status: providedStatus } = req.body;
   
   // RBAC Check
-  const membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  const project = await Project.findById(projectId);
+  
+  if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
+    // Owner is always an ADMIN if not explicitly in membership
+    membership = { role: 'OWNER' } as any;
+  }
+
   if (!membership) return res.status(403).json({ message: 'Forbidden' });
 
   let status = providedStatus || (environment === 'PROD' && membership.role !== 'OWNER' && membership.role !== 'ADMIN' ? 'PENDING_APPROVAL' : 'APPROVED');

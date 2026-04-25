@@ -17,6 +17,13 @@ export const createProject = async (req: AuthRequest, res: Response) => {
     owner: req.user!._id
   });
 
+  // Add the creator as an OWNER in the members table
+  await ProjectMember.create({
+    projectId: project._id,
+    userId: req.user!._id,
+    role: 'OWNER'
+  });
+
   // Automatically generate an initial production read-only key
   const { rawKey } = await generateApiKey(
     project._id as string,
@@ -29,7 +36,9 @@ export const createProject = async (req: AuthRequest, res: Response) => {
 };
 
 export const getProjects = async (req: AuthRequest, res: Response) => {
-  const projects = await Project.find({ owner: req.user!._id });
+  // Fetch projects where the user is a member
+  const memberships = await ProjectMember.find({ userId: req.user!._id }).populate('projectId');
+  const projects = memberships.map(m => m.projectId).filter(p => p !== null);
   res.json(projects);
 };
 
