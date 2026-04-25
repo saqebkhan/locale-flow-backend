@@ -1,8 +1,10 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import dotenv from 'dotenv';
 import { apiLimiter, sdkLimiter } from './middleware/rateLimiter';
 import { apiKeyProtect } from './middleware/apiKeyAuth';
 import { protect } from './middleware/auth';
@@ -13,8 +15,6 @@ import authRoutes from './routes/authRoutes';
 import projectRoutes from './routes/projectRoutes';
 import sdkRoutes from './routes/sdkRoutes';
 import translationRoutes from './routes/translationRoutes';
-
-dotenv.config();
 
 const app = express();
 

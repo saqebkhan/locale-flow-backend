@@ -95,13 +95,14 @@ export const inviteMember = async (req: AuthRequest, res: Response) => {
   // Send the invitation email
   try {
     await sendInvitationEmail(email, project, role, token);
-  } catch (error) {
+    res.status(201).json({ message: 'Invitation sent', invitation });
+  } catch (error: any) {
     console.error('Failed to send invitation email:', error);
-    // We still return 201 because the database record is created, 
-    // but the user should be notified in the response if needed.
+    res.status(500).json({ 
+      message: 'Invitation recorded but email failed: ' + (error.message || 'Unknown error'),
+      invitation 
+    });
   }
-
-  res.status(201).json({ message: 'Invitation sent', invitation });
 };
 
 export const getProjectMembers = async (req: AuthRequest, res: Response) => {
