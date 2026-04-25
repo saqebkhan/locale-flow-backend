@@ -9,57 +9,62 @@ import { translateText } from '../services/ai.service';
 import { sendApprovalEmail } from '../services/email.service';
 
 export const createTranslation = async (req: AuthRequest, res: Response) => {
-  const { projectId, language, namespace, key, value, environment = 'DEV', status: providedStatus } = req.body;
-  
-  // RBAC Check
-  let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  const project = await Project.findById(projectId);
-  
-  if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
-    membership = { role: 'OWNER' } as any;
-  }
-
-  if (!membership) return res.status(403).json({ message: 'Forbidden' });
-
-  // 1. VIEWER Restriction
-  if (membership.role === 'VIEWER') {
-    return res.status(403).json({ message: 'Viewers cannot modify translations' });
-  }
-
-  // 2. PROD Governance for EDITOR
-  let status = providedStatus || 'APPROVED';
-  if (environment === 'PROD' && membership.role === 'EDITOR') {
-    status = 'PENDING_APPROVAL';
-  }
-
-  const translation = await Translation.findOneAndUpdate(
-    { projectId, language, namespace, key, environment },
-    { value, status, updatedBy: req.user!._id, isArchived: false },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
-
-  if (!translation.createdBy) {
-    translation.createdBy = req.user!._id;
-    await translation.save();
-  }
-
-  // Handle Approval Email (Non-blocking)
-  if (status === 'PENDING_APPROVAL') {
-    try {
-      const projectDoc = await Project.findById(projectId);
-      // Try to find the owner from the Project document directly
-      const ownerUser = await User.findById(projectDoc?.owner);
-      
-      if (ownerUser?.email) {
-        // We don't await this to keep the API fast and prevent 500s if email service is down
-        sendApprovalEmail(ownerUser.email, projectDoc, translation).catch(e => console.error('Email failed:', e));
-      }
-    } catch (e) {
-      console.error('Failed to trigger approval email:', e);
+  try {
+    const { projectId, language, namespace, key, value, environment = 'DEV', status: providedStatus } = req.body;
+    
+    if (!projectId || !key || !language) {
+      return res.status(400).json({ message: 'Project ID, Key, and Language are required' });
     }
-  }
 
-  res.status(201).json(translation);
+    // RBAC Check
+    let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+    const project = await Project.findById(projectId);
+    
+    if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
+      membership = { role: 'OWNER' } as any;
+    }
+
+    if (!membership) return res.status(403).json({ message: 'Forbidden: You do not have access to this project' });
+
+    // 1. VIEWER Restriction
+    if (membership.role === 'VIEWER') {
+      return res.status(403).json({ message: 'Viewers cannot modify translations' });
+    }
+
+    // 2. PROD Governance for EDITOR
+    let status = providedStatus || 'APPROVED';
+    if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+      status = 'PENDING_APPROVAL';
+    }
+
+    const translation = await Translation.findOneAndUpdate(
+      { projectId, language, namespace, key, environment },
+      { value, status, updatedBy: req.user!._id, isArchived: false },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    if (!translation.createdBy) {
+      translation.createdBy = req.user!._id;
+      await translation.save();
+    }
+
+    // Handle Approval Email (Non-blocking)
+    if (status === 'PENDING_APPROVAL') {
+      try {
+        const ownerUser = await User.findById(project?.owner);
+        if (ownerUser?.email) {
+          sendApprovalEmail(ownerUser.email, project, translation).catch(e => console.error('Email failed:', e));
+        }
+      } catch (e) {
+        console.error('Failed to trigger approval email:', e);
+      }
+    }
+
+    return res.status(201).json(translation);
+  } catch (error: any) {
+    console.error('Create Translation Error:', error);
+    return res.status(500).json({ message: error.message || 'Internal Server Error' });
+  }
 };
 
 export const getTranslationsForProject = async (req: AuthRequest, res: Response) => {
@@ -97,39 +102,44 @@ export const restoreTranslation = async (req: AuthRequest, res: Response) => {
 };
 
 export const updateTranslation = async (req: AuthRequest, res: Response) => {
-  const { value } = req.body;
-  const translation = await Translation.findById(req.params.id);
-  if (!translation) return res.status(404).json({ message: 'Translation not found' });
+  try {
+    const { value } = req.body;
+    const translation = await Translation.findById(req.params.id);
+    if (!translation) return res.status(404).json({ message: 'Translation not found' });
 
-  const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
-  if (!membership || membership.role === 'VIEWER') {
-    return res.status(403).json({ message: 'Forbidden' });
-  }
-
-  // If Editor edits PROD, it goes back to PENDING_APPROVAL
-  let status = translation.status;
-  if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    status = 'PENDING_APPROVAL';
-    
-    // Trigger email
-    try {
-      const projectDoc = await Project.findById(translation.projectId);
-      const ownerUser = await User.findById(projectDoc?.owner);
-      if (ownerUser?.email) {
-        sendApprovalEmail(ownerUser.email, projectDoc, { ...translation.toObject(), value }).catch(e => console.error('Email update failed:', e));
-      }
-    } catch (e) {
-      console.error('Failed to trigger update approval email:', e);
+    const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
+    if (!membership || membership.role === 'VIEWER') {
+      return res.status(403).json({ message: 'Forbidden' });
     }
+
+    // If Editor edits PROD, it goes back to PENDING_APPROVAL
+    let status = translation.status;
+    if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+      status = 'PENDING_APPROVAL';
+      
+      // Trigger email
+      try {
+        const projectDoc = await Project.findById(translation.projectId);
+        const ownerUser = await User.findById(projectDoc?.owner);
+        if (ownerUser?.email) {
+          sendApprovalEmail(ownerUser.email, projectDoc, { ...translation.toObject(), value }).catch(e => console.error('Email update failed:', e));
+        }
+      } catch (e) {
+        console.error('Failed to trigger update approval email:', e);
+      }
+    }
+
+    const updated = await Translation.findByIdAndUpdate(
+      req.params.id,
+      { value, status, updatedBy: req.user!._id },
+      { new: true }
+    );
+
+    res.json(updated);
+  } catch (error: any) {
+    console.error('Update Translation Error:', error);
+    res.status(500).json({ message: error.message || 'Internal Server Error' });
   }
-
-  const updated = await Translation.findByIdAndUpdate(
-    req.params.id,
-    { value, status, updatedBy: req.user!._id },
-    { new: true }
-  );
-
-  res.json(updated);
 };
 
 export const updateKey = async (req: AuthRequest, res: Response) => {
