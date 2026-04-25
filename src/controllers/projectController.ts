@@ -6,6 +6,7 @@ import Invitation from '../models/Invitation';
 import ProjectMember from '../models/ProjectMember';
 import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
 import { generateApiKey } from '../services/apiKey.service';
+import { sendInvitationEmail } from '../services/email.service';
 import crypto from 'crypto';
 
 export const createProject = async (req: AuthRequest, res: Response) => {
@@ -88,7 +89,18 @@ export const inviteMember = async (req: AuthRequest, res: Response) => {
     token
   });
 
-  // In a real app, send email here. For now, just return success.
+  // Fetch project name for the email
+  const project = await Project.findById(projectId);
+
+  // Send the invitation email
+  try {
+    await sendInvitationEmail(email, project, role, token);
+  } catch (error) {
+    console.error('Failed to send invitation email:', error);
+    // We still return 201 because the database record is created, 
+    // but the user should be notified in the response if needed.
+  }
+
   res.status(201).json({ message: 'Invitation sent', invitation });
 };
 
