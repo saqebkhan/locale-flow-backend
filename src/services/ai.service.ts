@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { translate } from 'google-translate-api-x';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -8,10 +9,24 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 export const translateText = async (
   text: string,
   targetLanguages: string[],
-  sourceLanguage: string = 'English'
+  sourceLanguage: string = 'auto'
 ): Promise<{ [key: string]: string }> => {
+  // Fallback to free key-less translation if no API key is provided
   if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured');
+    console.log('No GEMINI_API_KEY found. Using free fallback translation...');
+    const results: { [key: string]: string } = {};
+    
+    await Promise.all(targetLanguages.map(async (lang) => {
+      try {
+        const res = await translate(text, { to: lang, from: sourceLanguage });
+        results[lang] = res.text;
+      } catch (err) {
+        console.error(`Fallback translation failed for ${lang}:`, err);
+        results[lang] = `[Translation Error]`;
+      }
+    }));
+    
+    return results;
   }
 
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
@@ -37,3 +52,18 @@ export const translateText = async (
     throw new Error('Failed to generate AI translation: ' + error.message);
   }
 };
+
+// --- Test Block ---
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('ai.service.ts')) {
+  console.log('Testing Gemini AI Integration...');
+  translateText('Hello world, welcome to our amazing translation platform!', ['fr', 'es', 'de'])
+    .then(res => {
+      console.log('✅ AI Translation Working!');
+      console.log(JSON.stringify(res, null, 2));
+    })
+    .catch(err => {
+      console.error('❌ AI Translation Failed!');
+      console.error(err.message);
+      console.log('\nTip: Make sure GEMINI_API_KEY is set in backend/.env');
+    });
+}
