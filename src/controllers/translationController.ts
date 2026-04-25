@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth';
 import Translation from '../models/Translation';
 import Project from '../models/Project';
 import ProjectMember from '../models/ProjectMember';
+import User from '../models/User';
 import { createSnapshot, rollbackToVersion } from '../services/versioning.service';
 import { translateText } from '../services/ai.service';
 import { sendApprovalEmail } from '../services/email.service';
@@ -42,12 +43,19 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
     await translation.save();
   }
 
-  // Handle Approval Email
+  // Handle Approval Email (Non-blocking)
   if (status === 'PENDING_APPROVAL') {
-    const project = await Project.findById(projectId);
-    const owner = await ProjectMember.findOne({ projectId, role: 'OWNER' }).populate('userId');
-    if (owner && (owner.userId as any).email) {
-      await sendApprovalEmail((owner.userId as any).email, project, translation);
+    try {
+      const projectDoc = await Project.findById(projectId);
+      // Try to find the owner from the Project document directly
+      const ownerUser = await User.findById(projectDoc?.owner);
+      
+      if (ownerUser?.email) {
+        // We don't await this to keep the API fast and prevent 500s if email service is down
+        sendApprovalEmail(ownerUser.email, projectDoc, translation).catch(e => console.error('Email failed:', e));
+      }
+    } catch (e) {
+      console.error('Failed to trigger approval email:', e);
     }
   }
 
@@ -104,10 +112,14 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
     status = 'PENDING_APPROVAL';
     
     // Trigger email
-    const project = await Project.findById(translation.projectId);
-    const owner = await ProjectMember.findOne({ projectId: translation.projectId, role: 'OWNER' }).populate('userId');
-    if (owner && (owner.userId as any).email) {
-      await sendApprovalEmail((owner.userId as any).email, project, { ...translation.toObject(), value });
+    try {
+      const projectDoc = await Project.findById(translation.projectId);
+      const ownerUser = await User.findById(projectDoc?.owner);
+      if (ownerUser?.email) {
+        sendApprovalEmail(ownerUser.email, projectDoc, { ...translation.toObject(), value }).catch(e => console.error('Email update failed:', e));
+      }
+    } catch (e) {
+      console.error('Failed to trigger update approval email:', e);
     }
   }
 
