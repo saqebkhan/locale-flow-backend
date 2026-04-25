@@ -15,6 +15,7 @@ import authRoutes from './routes/authRoutes';
 import projectRoutes from './routes/projectRoutes';
 import sdkRoutes from './routes/sdkRoutes';
 import translationRoutes from './routes/translationRoutes';
+import invitationRoutes from './routes/invitationRoutes';
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/projects', protect, projectRoutes);
 app.use('/api/translations', protect, translationRoutes);
+app.use('/api/invitations', invitationRoutes);
 
 // SDK APIs (Public with API Key)
 app.use('/api/v1/sdk', sdkLimiter, apiKeyProtect, setCacheHeaders(300), sdkRoutes);

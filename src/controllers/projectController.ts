@@ -8,6 +8,8 @@ import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
 import { generateApiKey } from '../services/apiKey.service';
 import { sendInvitationEmail } from '../services/email.service';
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import express from 'express';
 
 export const createProject = async (req: AuthRequest, res: Response) => {
   const { name, description, defaultLanguage } = req.body;
@@ -133,4 +135,54 @@ export const acceptInvitation = async (req: AuthRequest, res: Response) => {
   await invitation.save();
 
   res.json({ message: 'Invitation accepted', projectId: invitation.projectId });
+};
+
+export const getInvitation = async (req: express.Request, res: Response) => {
+  const { token } = req.params;
+  const invitation = await Invitation.findOne({ token, status: 'PENDING' }).populate('projectId', 'name');
+
+  if (!invitation) {
+    return res.status(404).json({ message: 'Invitation not found or already processed' });
+  }
+
+  res.json(invitation);
+};
+
+export const joinByInvitation = async (req: express.Request, res: Response) => {
+  const { token } = req.params;
+  const { password } = req.body;
+  
+  const invitation = await Invitation.findOne({ token, status: 'PENDING' });
+  if (!invitation) {
+    return res.status(404).json({ message: 'Invitation not found' });
+  }
+
+  // Create user
+  let user = await User.findOne({ email: invitation.email });
+  if (!user) {
+    user = await User.create({
+      email: invitation.email,
+      password, // Note: User model should hash this in its pre-save hook
+      name: invitation.email.split('@')[0]
+    });
+  }
+
+  // Add to project
+  await ProjectMember.create({
+    projectId: invitation.projectId,
+    userId: user._id,
+    role: invitation.role
+  });
+
+  invitation.status = 'ACCEPTED';
+  await invitation.save();
+
+  // Generate JWT for immediate login
+  const jwtToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET || 'secret');
+  
+  res.json({ 
+    message: 'Welcome to the team!', 
+    projectId: invitation.projectId,
+    user: { _id: user._id, email: user.email, name: user.name, token: jwtToken }
+  });
 };
