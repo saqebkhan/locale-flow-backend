@@ -43,17 +43,19 @@ export const generateApiKey = async (projectId: string, name: string, permission
   return { rawKey, apiKey };
 };
 
-export const rotateApiKey = async (oldKeyId: string) => {
-  const oldApiKey = await ApiKey.findById(oldKeyId);
-  if (!oldApiKey) throw new Error('API Key not found');
+export const rotateApiKey = async (keyId: string) => {
+  const apiKey = await ApiKey.findById(keyId);
+  if (!apiKey) throw new Error('API Key not found');
 
-  const { rawKey, apiKey } = await generateApiKey(
-    oldApiKey.projectId.toString(),
-    `${oldApiKey.name} (Rotated)`,
-    oldApiKey.permission,
-    oldApiKey.environment
-  );
+  const rawKey = `tp_${crypto.randomBytes(24).toString('hex')}`;
+  const keyHash = crypto.createHash('sha256').update(rawKey + (process.env.API_KEY_SALT || '')).digest('hex');
+  const encryptedKey = encrypt(rawKey);
 
-  await ApiKey.findByIdAndDelete(oldKeyId);
+  // Update the existing record
+  apiKey.keyHash = keyHash;
+  apiKey.encryptedKey = encryptedKey;
+  apiKey.name = apiKey.name.includes('(Rotated)') ? apiKey.name : `${apiKey.name} (Rotated)`;
+  await apiKey.save();
+
   return { rawKey, apiKey };
 };
