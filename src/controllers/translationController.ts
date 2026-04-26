@@ -37,13 +37,18 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
 
     // 2. PROD Governance for EDITOR
     let status = providedStatus || 'APPROVED';
+    let requestedBy = undefined;
+    let requestedAction = undefined;
+
     if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
       status = 'PENDING_APPROVAL';
+      requestedBy = req.user!._id;
+      requestedAction = 'CREATE';
     }
 
     const translation = await Translation.findOneAndUpdate(
       { projectId, language, namespace, key, environment },
-      { value, status, updatedBy: req.user!._id, isArchived: false },
+      { value, status, updatedBy: req.user!._id, isArchived: false, requestedBy, requestedAction },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
@@ -64,6 +69,8 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    await translation.populate('requestedBy', 'name email');
+
     return res.status(201).json(translation);
   } catch (error: any) {
     console.error('Create Translation Error:', error);
@@ -77,7 +84,7 @@ export const getTranslationsForProject = async (req: AuthRequest, res: Response)
     projectId: req.params.projectId,
     environment,
     isArchived: false
-  });
+  }).populate('requestedBy', 'name email');
   res.json(translations);
 };
 
@@ -90,12 +97,25 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  // Editors cannot delete PROD translations directly
+  // Editors cannot delete PROD translations directly, but can request it
   if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    return res.status(403).json({ message: 'Only Admins can delete from Production. Please contact an Admin.' });
+    await Translation.findByIdAndUpdate(req.params.id, { 
+      status: 'PENDING_APPROVAL', 
+      requestedBy: req.user!._id, 
+      requestedAction: 'DELETE' 
+    });
+    
+    // Trigger notification
+    const project = await Project.findById(translation.projectId);
+    const ownerUser = await User.findById(project?.owner);
+    if (ownerUser?.email) {
+      sendApprovalEmail(ownerUser.email, project!, { ...translation.toObject(), value: '[REQUESTED DELETION]' } as any).catch(e => console.error('Delete request email failed:', e));
+    }
+    
+    return res.status(200).json({ message: 'Deletion request sent for approval' });
   }
 
-  // Soft delete for Undo functionality
+  // Soft delete for others
   await Translation.findByIdAndUpdate(req.params.id, { isArchived: true });
   res.status(204).send();
 };
@@ -118,8 +138,13 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
 
     // If Editor edits PROD, it goes back to PENDING_APPROVAL
     let status = translation.status;
+    let requestedBy = translation.requestedBy;
+    let requestedAction = translation.requestedAction;
+
     if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
       status = 'PENDING_APPROVAL';
+      requestedBy = req.user!._id;
+      requestedAction = 'UPDATE';
       
       // Trigger email
       try {
@@ -135,9 +160,9 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
 
     const updated = await Translation.findByIdAndUpdate(
       req.params.id,
-      { value, status, updatedBy: req.user!._id },
+      { value, status, updatedBy: req.user!._id, requestedBy, requestedAction },
       { new: true }
-    );
+    ).populate('requestedBy', 'name email');
 
     res.json(updated);
   } catch (error: any) {
@@ -222,7 +247,13 @@ export const approveTranslation = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Only Admins can approve' });
   }
 
+  if (translation.requestedAction === 'DELETE') {
+    translation.isArchived = true;
+  }
+  
   translation.status = 'APPROVED';
+  translation.requestedBy = undefined;
+  translation.requestedAction = undefined;
   translation.updatedBy = req.user!._id;
   await translation.save();
   res.json(translation);
@@ -238,6 +269,8 @@ export const rejectTranslation = async (req: AuthRequest, res: Response) => {
   }
 
   translation.status = 'REJECTED';
+  translation.requestedBy = undefined;
+  translation.requestedAction = undefined;
   translation.updatedBy = req.user!._id;
   await translation.save();
   res.json({ message: 'Translation rejected' });
@@ -250,15 +283,33 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: 'Invalid JSON data' });
   }
 
-  const results = [];
   try {
+    // RBAC Check
+    let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+    const project = await Project.findById(projectId);
+    
+    if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
+      membership = { role: 'OWNER' } as any;
+    }
+
+    if (!membership || membership.role === 'VIEWER') {
+      return res.status(403).json({ message: 'Forbidden: You do not have permissions to upload to this project' });
+    }
+
+    // PROD Governance
+    let status = 'APPROVED';
+    if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+      status = 'PENDING_APPROVAL';
+    }
+
+    const results = [];
     for (const [lang, keys] of Object.entries(data)) {
       if (typeof keys !== 'object') continue;
       
       for (const [key, value] of Object.entries(keys as object)) {
         const translation = await Translation.findOneAndUpdate(
           { projectId, language: lang, key, environment, namespace: 'common' },
-          { value, status: 'APPROVED', updatedBy: req.user!._id, isArchived: false },
+          { value, status, updatedBy: req.user!._id, isArchived: false },
           { upsert: true, new: true, setDefaultsOnInsert: true }
         );
         if (!translation.createdBy) {
@@ -268,9 +319,26 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
         results.push(translation);
       }
     }
-    res.status(201).json({ message: `Successfully imported ${results.length} keys`, count: results.length });
+
+    // Trigger one notification for the whole batch if pending
+    if (status === 'PENDING_APPROVAL' && project) {
+      try {
+        const ownerUser = await User.findById(project.owner);
+        if (ownerUser?.email) {
+          // Just notify the owner that a bulk upload happened and needs review
+          // We can use a simplified version of sendApprovalEmail or a dedicated one
+          sendApprovalEmail(ownerUser.email, project, { key: 'Multiple Keys (Bulk Upload)', language: 'Multiple', value: 'Bulk update batch' } as any)
+            .catch(e => console.error('Bulk email failed:', e));
+        }
+      } catch (e) {
+        console.error('Failed to trigger bulk approval email:', e);
+      }
+    }
+
+    res.status(201).json({ message: `Successfully imported ${results.length} keys`, count: results.length, status });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    console.error('Bulk Upload Error:', error);
+    res.status(500).json({ message: error.message || 'Internal Server Error' });
   }
 };
 

@@ -11,6 +11,8 @@ export interface ITranslation extends Document {
   isArchived: boolean;
   createdBy: mongoose.Types.ObjectId;
   updatedBy: mongoose.Types.ObjectId;
+  requestedBy?: mongoose.Types.ObjectId;
+  requestedAction?: 'CREATE' | 'UPDATE' | 'DELETE';
 }
 
 const TranslationSchema: Schema = new Schema({
@@ -20,10 +22,12 @@ const TranslationSchema: Schema = new Schema({
   key: { type: String, required: true },
   value: { type: String, required: true },
   environment: { type: String, enum: ['DEV', 'TEST', 'PROD'], default: 'DEV' },
-  status: { type: String, enum: ['DRAFT', 'AI_SUGGESTED', 'PENDING_APPROVAL', 'APPROVED'], default: 'DRAFT' },
+  status: { type: String, enum: ['DRAFT', 'AI_SUGGESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'], default: 'DRAFT' },
   isArchived: { type: Boolean, default: false },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
-  updatedBy: { type: Schema.Types.ObjectId, ref: 'User' }
+  updatedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  requestedAction: { type: String, enum: ['CREATE', 'UPDATE', 'DELETE'] }
 }, { timestamps: true });
 
 // Index for optimized fetching
