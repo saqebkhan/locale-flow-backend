@@ -192,13 +192,40 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
 
 export const deleteKey = async (req: AuthRequest, res: Response) => {
   const { projectId, key } = req.params;
+  const { environment = 'DEV' } = req.query;
 
   const membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
   if (!membership || membership.role === 'VIEWER') {
     return res.status(403).json({ message: 'Forbidden' });
   }
+
+  // Editors cannot delete PROD keys directly, but can request it
+  if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    const result = await Translation.updateMany(
+      { projectId, key, environment },
+      { 
+        status: 'PENDING_APPROVAL', 
+        requestedBy: req.user!._id, 
+        requestedAction: 'DELETE' 
+      }
+    );
+
+    if (result.modifiedCount > 0) {
+      // Trigger notification
+      const project = await Project.findById(projectId);
+      const ownerUser = await User.findById(project?.owner);
+      if (ownerUser?.email) {
+        sendApprovalEmail(ownerUser.email, project!, { key, language: 'All', value: '[REQUESTED KEY DELETION]' } as any).catch(e => console.error('Key delete request email failed:', e));
+      }
+    }
+
+    return res.status(200).json({ 
+      message: 'Key deletion request sent for approval', 
+      requestedCount: result.modifiedCount 
+    });
+  }
   
-  const result = await Translation.deleteMany({ projectId, key });
+  const result = await Translation.deleteMany({ projectId, key, environment });
 
   res.json({ message: `Deleted ${result.deletedCount} translations`, deletedCount: result.deletedCount });
 };
