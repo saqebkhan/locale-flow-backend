@@ -20,6 +20,7 @@ export const fetchTranslations = async (req: ApiKeyRequest, res: Response) => {
     const translations = await getTranslationsWithFallback(
       projectId.toString(),
       (lang as string) || 'en',
+      req.apiKey.environment,
       namespace as string
     );
     res.json(translations);

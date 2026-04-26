@@ -6,9 +6,9 @@ export enum ApiKeyPermission {
 }
 
 export enum ApiKeyEnvironment {
-  DEVELOPMENT = 'DEVELOPMENT',
-  STAGING = 'STAGING',
-  PRODUCTION = 'PRODUCTION'
+  DEVELOPMENT = 'DEV',
+  STAGING = 'TEST',
+  PRODUCTION = 'PROD'
 }
 
 export interface IApiKey extends Document {

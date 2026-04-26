@@ -1,8 +1,8 @@
 import Translation from '../models/Translation';
 import Project from '../models/Project';
 
-export const getTranslations = async (projectId: string, language: string, namespace?: string) => {
-  const query: any = { projectId, language };
+export const getTranslations = async (projectId: string, language: string, environment: string, namespace?: string) => {
+  const query: any = { projectId, language, environment };
   if (namespace) query.namespace = namespace;
 
   const translations = await Translation.find(query);
@@ -15,7 +15,7 @@ export const getTranslations = async (projectId: string, language: string, names
   return result;
 };
 
-export const getTranslationsWithFallback = async (projectId: string, language: string, namespace?: string) => {
+export const getTranslationsWithFallback = async (projectId: string, language: string, environment: string, namespace?: string) => {
   const project = await Project.findById(projectId);
   if (!project) throw new Error('Project not found');
 
@@ -33,7 +33,7 @@ export const getTranslationsWithFallback = async (projectId: string, language: s
   const finalResult: any = {};
 
   for (const lang of languages.reverse()) {
-    const translations = await getTranslations(projectId, lang, namespace);
+    const translations = await getTranslations(projectId, lang, environment, namespace);
     Object.assign(finalResult, translations);
   }
 
