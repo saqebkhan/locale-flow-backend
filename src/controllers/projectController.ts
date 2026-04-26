@@ -186,3 +186,39 @@ export const joinByInvitation = async (req: express.Request, res: Response) => {
     user: { _id: user._id, email: user.email, name: user.name, token: jwtToken }
   });
 };
+
+export const updateMemberRole = async (req: AuthRequest, res: Response) => {
+  const { id: projectId, memberId } = req.params;
+  const { role } = req.body;
+
+  // RBAC Check: Only Admin/Owner can change roles
+  const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Forbidden: Only Admins can change roles' });
+  }
+
+  const member = await ProjectMember.findByIdAndUpdate(memberId, { role }, { new: true });
+  if (!member) return res.status(404).json({ message: 'Member not found' });
+
+  res.json(member);
+};
+
+export const removeMember = async (req: AuthRequest, res: Response) => {
+  const { id: projectId, memberId } = req.params;
+
+  // RBAC Check: Only Admin/Owner can remove members
+  const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Forbidden: Only Admins can remove members' });
+  }
+
+  const member = await ProjectMember.findById(memberId);
+  if (!member) return res.status(404).json({ message: 'Member not found' });
+
+  if (member.role === 'OWNER') {
+    return res.status(400).json({ message: 'Cannot remove the project owner' });
+  }
+
+  await ProjectMember.findByIdAndDelete(memberId);
+  res.json({ message: 'Member removed from project' });
+};
