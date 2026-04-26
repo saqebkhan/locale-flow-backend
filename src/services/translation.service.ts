@@ -1,8 +1,18 @@
 import Translation from '../models/Translation';
 import Project from '../models/Project';
 
+const mapEnvironment = (env: string): string => {
+  const map: Record<string, string> = {
+    'DEVELOPMENT': 'DEV',
+    'STAGING': 'TEST',
+    'PRODUCTION': 'PROD'
+  };
+  return map[env] || env;
+};
+
 export const getTranslations = async (projectId: string, language: string, environment: string, namespace?: string) => {
-  const query: any = { projectId, language, environment };
+  const normalizedEnv = mapEnvironment(environment);
+  const query: any = { projectId, language, environment: normalizedEnv };
   if (namespace) query.namespace = namespace;
 
   const translations = await Translation.find(query);

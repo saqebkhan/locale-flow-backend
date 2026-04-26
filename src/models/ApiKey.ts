@@ -8,7 +8,10 @@ export enum ApiKeyPermission {
 export enum ApiKeyEnvironment {
   DEVELOPMENT = 'DEV',
   STAGING = 'TEST',
-  PRODUCTION = 'PROD'
+  PRODUCTION = 'PROD',
+  LEGACY_DEV = 'DEVELOPMENT',
+  LEGACY_STAGING = 'STAGING',
+  LEGACY_PROD = 'PRODUCTION'
 }
 
 export interface IApiKey extends Document {

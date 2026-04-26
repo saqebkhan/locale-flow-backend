@@ -42,7 +42,12 @@ export const reportMissingKeys = async (req: ApiKeyRequest, res: Response) => {
 
   if (Array.isArray(keys)) {
     for (const key of keys) {
-      await logQueue.add('reportMissing', { projectId, language: lang, key });
+      try {
+        await logQueue.add('reportMissing', { projectId, language: lang, key });
+      } catch (err) {
+        console.error('Failed to add to logQueue:', err);
+        // Continue regardless of queue failure
+      }
     }
   }
 
