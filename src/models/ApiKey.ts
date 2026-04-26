@@ -13,6 +13,7 @@ export enum ApiKeyEnvironment {
 
 export interface IApiKey extends Document {
   keyHash: string;
+  encryptedKey: string;
   projectId: mongoose.Types.ObjectId;
   name: string;
   permission: ApiKeyPermission;
@@ -22,6 +23,7 @@ export interface IApiKey extends Document {
 
 const ApiKeySchema: Schema = new Schema({
   keyHash: { type: String, required: true, unique: true },
+  encryptedKey: { type: String, required: true },
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
   name: { type: String, required: true },
   permission: { type: String, enum: Object.values(ApiKeyPermission), default: ApiKeyPermission.READ_ONLY },

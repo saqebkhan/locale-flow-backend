@@ -5,7 +5,7 @@ import User from '../models/User';
 import Invitation from '../models/Invitation';
 import ProjectMember from '../models/ProjectMember';
 import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
-import { generateApiKey } from '../services/apiKey.service';
+import { generateApiKey, decrypt } from '../services/apiKey.service';
 import { sendInvitationEmail } from '../services/email.service';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -46,14 +46,44 @@ export const getProjects = async (req: AuthRequest, res: Response) => {
 };
 
 export const getProjectKeys = async (req: AuthRequest, res: Response) => {
-  const keys = await ApiKey.find({ projectId: req.params.id }).select('-keyHash');
-  res.json(keys);
+  const projectId = req.params.id;
+  const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  const isPrivileged = requesterMembership && (requesterMembership.role === 'OWNER' || requesterMembership.role === 'ADMIN');
+
+  const query: any = { projectId };
+  if (!isPrivileged) {
+    // Non-admins can only see non-production keys
+    query.environment = { $ne: ApiKeyEnvironment.PRODUCTION };
+  }
+
+  const keys = await ApiKey.find(query).select('-keyHash');
+  const decryptedKeys = keys.map(k => {
+    const keyObj = k.toObject();
+    try {
+      keyObj.key = decrypt(keyObj.encryptedKey);
+    } catch (e) {
+      keyObj.key = 'Error decrypting';
+    }
+    delete keyObj.encryptedKey;
+    return keyObj;
+  });
+  res.json(decryptedKeys);
 };
 
 export const createNewKey = async (req: AuthRequest, res: Response) => {
   const { name, permission, environment } = req.body;
+  const projectId = req.params.id;
+
+  // Check if a key already exists for this environment
+  const existingKey = await ApiKey.findOne({ projectId, environment });
+  if (existingKey) {
+    return res.status(400).json({ 
+      message: `A key for the ${environment} environment already exists. Please rotate the existing key instead of creating a new one.` 
+    });
+  }
+
   const { rawKey, apiKey } = await generateApiKey(
-    req.params.id,
+    projectId,
     name,
     permission,
     environment
