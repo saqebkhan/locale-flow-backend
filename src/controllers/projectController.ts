@@ -5,7 +5,7 @@ import User from '../models/User';
 import Invitation from '../models/Invitation';
 import ProjectMember from '../models/ProjectMember';
 import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
-import { generateApiKey, decrypt } from '../services/apiKey.service';
+import { generateApiKey, decrypt, rotateApiKey } from '../services/apiKey.service';
 import { sendInvitationEmail } from '../services/email.service';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
