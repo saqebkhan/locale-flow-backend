@@ -9,6 +9,8 @@ router.post('/:id/invite', inviteMember);
 router.get('/:id/members', getProjectMembers);
 router.get('/:id/keys', getProjectKeys);
 router.post('/:id/keys', createNewKey);
+router.delete('/:id/keys/:keyId', deleteApiKey);
+router.post('/:id/keys/:keyId/rotate', rotateKey);
 
 // Member Management
 router.put('/:id/members/:memberId', updateMemberRole);

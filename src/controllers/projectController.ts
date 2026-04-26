@@ -256,3 +256,35 @@ export const removeMember = async (req: AuthRequest, res: Response) => {
   await ProjectMember.findByIdAndDelete(memberId);
   res.json({ message: 'Member removed from project' });
 };
+
+export const deleteApiKey = async (req: AuthRequest, res: Response) => {
+  const { id: projectId, keyId } = req.params;
+
+  // RBAC Check
+  const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Forbidden: Only Admins can delete API keys' });
+  }
+
+  const key = await ApiKey.findOneAndDelete({ _id: keyId, projectId });
+  if (!key) return res.status(404).json({ message: 'API Key not found' });
+
+  res.json({ message: 'API Key deleted successfully' });
+};
+
+export const rotateKey = async (req: AuthRequest, res: Response) => {
+  const { id: projectId, keyId } = req.params;
+
+  // RBAC Check
+  const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Forbidden: Only Admins can rotate API keys' });
+  }
+
+  try {
+    const { rawKey, apiKey } = await rotateApiKey(keyId);
+    res.json({ rawKey, apiKey });
+  } catch (err: any) {
+    res.status(400).json({ message: err.message });
+  }
+};
