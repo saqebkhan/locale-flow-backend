@@ -174,6 +174,7 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
 export const updateKey = async (req: AuthRequest, res: Response) => {
   const { projectId, oldKey } = req.params;
   const { newKey } = req.body;
+  const { environment = 'DEV' } = req.query;
   
   if (!newKey) return res.status(400).json({ message: 'New key name is required' });
 
@@ -182,8 +183,13 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
+  // Block Editors from renaming in PROD for now
+  if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Only Admins can rename keys in Production.' });
+  }
+
   const result = await Translation.updateMany(
-    { projectId, key: oldKey },
+    { projectId, key: oldKey, environment },
     { key: newKey, updatedBy: req.user!._id }
   );
 
