@@ -31,4 +31,6 @@ const ApiKeySchema: Schema = new Schema({
   lastUsedAt: { type: Date }
 }, { timestamps: true });
 
+ApiKeySchema.index({ projectId: 1, environment: 1 }, { unique: true });
+
 export default mongoose.model<IApiKey>('ApiKey', ApiKeySchema);

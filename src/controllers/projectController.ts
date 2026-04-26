@@ -50,15 +50,27 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
   const isPrivileged = requesterMembership && (requesterMembership.role === 'OWNER' || requesterMembership.role === 'ADMIN');
 
-  const query: any = { projectId };
-  if (!isPrivileged) {
-    // Non-admins can only see non-production keys
-    query.environment = { $ne: ApiKeyEnvironment.PRODUCTION };
-  }
+  // We want to return a status for EACH environment
+  const environments = Object.values(ApiKeyEnvironment);
+  const keys = await ApiKey.find({ projectId }).select('-keyHash');
+  
+  const response = environments.map(env => {
+    const key = keys.find(k => k.environment === env);
+    if (!key) return { environment: env, status: 'EMPTY' };
 
-  const keys = await ApiKey.find(query).select('-keyHash');
-  const decryptedKeys = keys.map(k => {
-    const keyObj = k.toObject();
+    const isProduction = env === ApiKeyEnvironment.PRODUCTION;
+    // Non-admins can only see non-production keys
+    if (isProduction && !isPrivileged) {
+      return { 
+        _id: key._id,
+        environment: env, 
+        name: key.name, 
+        status: 'RESTRICTED',
+        key: '•••••••••••••••• (Admin Only)'
+      };
+    }
+
+    const keyObj = key.toObject();
     if (!keyObj.encryptedKey) {
       keyObj.key = 'Legacy Key (Regenerate to View)';
     } else {
@@ -69,30 +81,39 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
       }
     }
     delete keyObj.encryptedKey;
-    return keyObj;
+    return { ...keyObj, status: 'ACTIVE' };
   });
-  res.json(decryptedKeys);
+
+  res.json(response);
 };
 
 export const createNewKey = async (req: AuthRequest, res: Response) => {
-  const { name, permission, environment } = req.body;
+  const { environment, permission = ApiKeyPermission.READ_ONLY } = req.body;
   const projectId = req.params.id;
+
+  if (!environment || !Object.values(ApiKeyEnvironment).includes(environment)) {
+    return res.status(400).json({ message: 'Valid environment is required (DEVELOPMENT, STAGING, or PRODUCTION)' });
+  }
 
   // Check if a key already exists for this environment
   const existingKey = await ApiKey.findOne({ projectId, environment });
   if (existingKey) {
     return res.status(400).json({ 
-      message: `A key for the ${environment} environment already exists. Please rotate the existing key instead of creating a new one.` 
+      message: `A key for the ${environment} environment already exists. Use the Rotate function to change it.` 
     });
   }
 
-  const { rawKey, apiKey } = await generateApiKey(
-    projectId,
-    name,
-    permission,
-    environment
-  );
-  res.status(201).json({ rawKey, apiKey });
+  try {
+    const { rawKey, apiKey } = await generateApiKey(
+      projectId,
+      `${environment.charAt(0) + environment.slice(1).toLowerCase()} SDK Key`,
+      permission,
+      environment
+    );
+    res.status(201).json({ rawKey, apiKey });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Failed to provision key: ' + err.message });
+  }
 };
 
 export const getProjectDetails = async (req: AuthRequest, res: Response) => {
