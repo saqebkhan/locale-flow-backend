@@ -59,10 +59,14 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
   const keys = await ApiKey.find(query).select('-keyHash');
   const decryptedKeys = keys.map(k => {
     const keyObj = k.toObject();
-    try {
-      keyObj.key = decrypt(keyObj.encryptedKey);
-    } catch (e) {
-      keyObj.key = 'Error decrypting';
+    if (!keyObj.encryptedKey) {
+      keyObj.key = 'Legacy Key (Regenerate to View)';
+    } else {
+      try {
+        keyObj.key = decrypt(keyObj.encryptedKey);
+      } catch (e) {
+        keyObj.key = 'Decryption Error';
+      }
     }
     delete keyObj.encryptedKey;
     return keyObj;
