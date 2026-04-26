@@ -13,6 +13,7 @@ export interface ITranslation extends Document {
   updatedBy: mongoose.Types.ObjectId;
   requestedBy?: mongoose.Types.ObjectId;
   requestedAction?: 'CREATE' | 'UPDATE' | 'DELETE';
+  previousValue?: string;
 }
 
 const TranslationSchema: Schema = new Schema({
@@ -21,6 +22,7 @@ const TranslationSchema: Schema = new Schema({
   namespace: { type: String, default: 'common' },
   key: { type: String, required: true },
   value: { type: String, required: true },
+  previousValue: { type: String },
   environment: { type: String, enum: ['DEV', 'TEST', 'PROD'], default: 'DEV' },
   status: { type: String, enum: ['DRAFT', 'AI_SUGGESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'], default: 'DRAFT' },
   isArchived: { type: Boolean, default: false },

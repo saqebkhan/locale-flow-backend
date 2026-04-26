@@ -99,11 +99,11 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
 
   // Editors cannot delete PROD translations directly, but can request it
   if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    await Translation.findByIdAndUpdate(req.params.id, { 
+    const updated = await Translation.findByIdAndUpdate(req.params.id, { 
       status: 'PENDING_APPROVAL', 
       requestedBy: req.user!._id, 
       requestedAction: 'DELETE' 
-    });
+    }, { new: true }).populate('requestedBy', 'name email');
     
     // Trigger notification
     const project = await Project.findById(translation.projectId);
@@ -112,7 +112,7 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
       sendApprovalEmail(ownerUser.email, project!, { ...translation.toObject(), value: '[REQUESTED DELETION]' } as any).catch(e => console.error('Delete request email failed:', e));
     }
     
-    return res.status(200).json({ message: 'Deletion request sent for approval' });
+    return res.status(200).json(updated);
   }
 
   // Soft delete for others
@@ -145,6 +145,7 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
       status = 'PENDING_APPROVAL';
       requestedBy = req.user!._id;
       requestedAction = 'UPDATE';
+      const previousValue = translation.value; // Store current for possible revert
       
       // Trigger email
       try {
@@ -156,13 +157,20 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
       } catch (e) {
         console.error('Failed to trigger update approval email:', e);
       }
+      
+      const updated = await Translation.findByIdAndUpdate(
+        req.params.id,
+        { value, status, updatedBy: req.user!._id, requestedBy, requestedAction, previousValue },
+        { new: true }
+      ).populate('requestedBy', 'name email');
+      return res.json(updated);
     }
 
     const updated = await Translation.findByIdAndUpdate(
       req.params.id,
-      { value, status, updatedBy: req.user!._id, requestedBy, requestedAction },
+      { value, status, updatedBy: req.user!._id },
       { new: true }
-    ).populate('requestedBy', 'name email');
+    );
 
     res.json(updated);
   } catch (error: any) {
@@ -293,6 +301,7 @@ export const approveTranslation = async (req: AuthRequest, res: Response) => {
 };
 
 export const rejectTranslation = async (req: AuthRequest, res: Response) => {
+  const { deleteRecord = false } = req.body;
   const translation = await Translation.findById(req.params.id);
   if (!translation) return res.status(404).json({ message: 'Not found' });
 
@@ -301,12 +310,28 @@ export const rejectTranslation = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Only Admins can reject' });
   }
 
-  translation.status = 'REJECTED';
+  if (deleteRecord) {
+    translation.isArchived = true;
+  } else {
+    // Revert logic
+    if (translation.requestedAction === 'UPDATE' && translation.previousValue) {
+      translation.value = translation.previousValue;
+      translation.status = 'APPROVED';
+    } else if (translation.requestedAction === 'DELETE') {
+      translation.status = 'APPROVED'; // Cancel deletion
+    } else {
+      translation.status = 'REJECTED'; // New translation rejected
+    }
+  }
+
   translation.requestedBy = undefined;
   translation.requestedAction = undefined;
+  translation.previousValue = undefined;
   translation.updatedBy = req.user!._id;
   await translation.save();
-  res.json({ message: 'Translation rejected' });
+  
+  const populated = await Translation.findById(translation._id).populate('requestedBy', 'name email');
+  res.json(populated || translation);
 };
 
 export const bulkUpload = async (req: AuthRequest, res: Response) => {
