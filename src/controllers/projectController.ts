@@ -143,6 +143,31 @@ export const addEnvironment = async (req: AuthRequest, res: Response) => {
   res.status(201).json(project.environments);
 };
 
+export const removeEnvironment = async (req: AuthRequest, res: Response) => {
+  const { name } = req.params;
+  const projectId = req.params.id;
+
+  if (name === 'DEVELOPMENT') {
+    return res.status(400).json({ message: 'Cannot delete the default DEVELOPMENT environment' });
+  }
+
+  const project = await Project.findById(projectId);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+
+  if (!project.environments.includes(name)) {
+    return res.status(404).json({ message: 'Environment not found' });
+  }
+
+  // Remove from array
+  project.environments = project.environments.filter(e => e !== name);
+  await project.save();
+
+  // Cleanup: Delete API keys for this environment
+  await ApiKey.deleteMany({ projectId, environment: name });
+
+  res.json({ message: 'Environment removed', environments: project.environments });
+};
+
 export const getProjectDetails = async (req: AuthRequest, res: Response) => {
   const project = await Project.findById(req.params.id);
   if (!project) return res.status(404).json({ message: 'Project not found' });

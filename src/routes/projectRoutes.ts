@@ -1,5 +1,5 @@
 import express from 'express';
-import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers, acceptInvitation, updateMemberRole, removeMember, deleteApiKey, rotateKey, addEnvironment } from '../controllers/projectController';
+import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers, acceptInvitation, updateMemberRole, removeMember, deleteApiKey, rotateKey, addEnvironment, removeEnvironment } from '../controllers/projectController';
 import { protect } from '../middleware/auth';
 
 const router = express.Router();
@@ -7,6 +7,7 @@ const router = express.Router();
 router.route('/').post(protect, createProject).get(protect, getProjects);
 router.route('/:id').get(protect, getProjectDetails).put(protect, updateProject);
 router.post('/:id/environments', protect, addEnvironment);
+router.delete('/:id/environments/:name', protect, removeEnvironment);
 router.post('/:id/invite', protect, inviteMember);
 router.get('/:id/members', protect, getProjectMembers);
 router.get('/:id/keys', protect, getProjectKeys);
