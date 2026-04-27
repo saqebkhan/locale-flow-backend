@@ -4,7 +4,7 @@ import Project from '../models/Project';
 import User from '../models/User';
 import Invitation from '../models/Invitation';
 import ProjectMember from '../models/ProjectMember';
-import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
+import ApiKey, { ApiKeyPermission } from '../models/ApiKey';
 import { generateApiKey, decrypt, rotateApiKey } from '../services/apiKey.service';
 import { sendInvitationEmail } from '../services/email.service';
 import crypto from 'crypto';
@@ -27,12 +27,12 @@ export const createProject = async (req: AuthRequest, res: Response) => {
     role: 'OWNER'
   });
 
-  // Automatically generate an initial production read-only key
+  // Automatically generate an initial development read-only key
   const { rawKey } = await generateApiKey(
     project._id as string,
-    'Default Production Key',
+    'Initial Development Key',
     ApiKeyPermission.READ_ONLY,
-    ApiKeyEnvironment.PRODUCTION
+    'DEVELOPMENT'
   );
 
   res.status(201).json({ project, initialApiKey: rawKey });
@@ -50,16 +50,19 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
   const isPrivileged = requesterMembership && (requesterMembership.role === 'OWNER' || requesterMembership.role === 'ADMIN');
 
-  // We want to return a status for EACH environment
-  const environments = Object.values(ApiKeyEnvironment);
+  // We want to return a status for EACH environment in the project
+  const project = await Project.findById(projectId);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+
+  const environments = project.environments || ['DEVELOPMENT'];
   const keys = await ApiKey.find({ projectId }).select('-keyHash');
   
   const response = environments.map(env => {
     const key = keys.find(k => k.environment === env);
     if (!key) return { environment: env, status: 'EMPTY' };
 
-    const isProduction = env === ApiKeyEnvironment.PRODUCTION;
-    // Non-admins can only see non-production keys
+    const isProduction = env.toUpperCase() === 'PRODUCTION' || env.toUpperCase() === 'PROD';
+    // Non-admins can only see production-like keys if privileged
     if (isProduction && !isPrivileged) {
       return { 
         _id: key._id,
@@ -90,9 +93,11 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
 export const createNewKey = async (req: AuthRequest, res: Response) => {
   const { environment, permission = ApiKeyPermission.READ_ONLY } = req.body;
   const projectId = req.params.id;
+  const project = await Project.findById(projectId);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
 
-  if (!environment || !Object.values(ApiKeyEnvironment).includes(environment)) {
-    return res.status(400).json({ message: 'Valid environment is required (DEVELOPMENT, STAGING, or PRODUCTION)' });
+  if (!environment || !project.environments.includes(environment)) {
+    return res.status(400).json({ message: 'Valid environment from project list is required' });
   }
 
   // Check if a key already exists for this environment
@@ -114,6 +119,28 @@ export const createNewKey = async (req: AuthRequest, res: Response) => {
   } catch (err: any) {
     res.status(500).json({ message: 'Failed to provision key: ' + err.message });
   }
+};
+
+export const addEnvironment = async (req: AuthRequest, res: Response) => {
+  const { name } = req.body;
+  const projectId = req.params.id;
+
+  if (!name || name.trim() === '') {
+    return res.status(400).json({ message: 'Environment name is required' });
+  }
+
+  const project = await Project.findById(projectId);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+
+  // Prevent duplicates (case insensitive)
+  if (project.environments.some(e => e.toUpperCase() === name.toUpperCase())) {
+    return res.status(400).json({ message: 'Environment already exists' });
+  }
+
+  project.environments.push(name.trim());
+  await project.save();
+
+  res.status(201).json(project.environments);
 };
 
 export const getProjectDetails = async (req: AuthRequest, res: Response) => {

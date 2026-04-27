@@ -5,14 +5,6 @@ export enum ApiKeyPermission {
   ADMIN = 'ADMIN'
 }
 
-export enum ApiKeyEnvironment {
-  DEVELOPMENT = 'DEV',
-  STAGING = 'TEST',
-  PRODUCTION = 'PROD',
-  LEGACY_DEV = 'DEVELOPMENT',
-  LEGACY_STAGING = 'STAGING',
-  LEGACY_PROD = 'PRODUCTION'
-}
 
 export interface IApiKey extends Document {
   keyHash: string;
@@ -20,7 +12,7 @@ export interface IApiKey extends Document {
   projectId: mongoose.Types.ObjectId;
   name: string;
   permission: ApiKeyPermission;
-  environment: ApiKeyEnvironment;
+  environment: string;
   lastUsedAt?: Date;
 }
 
@@ -30,7 +22,7 @@ const ApiKeySchema: Schema = new Schema({
   projectId: { type: Schema.Types.ObjectId, ref: 'Project', required: true },
   name: { type: String, required: true },
   permission: { type: String, enum: Object.values(ApiKeyPermission), default: ApiKeyPermission.READ_ONLY },
-  environment: { type: String, enum: Object.values(ApiKeyEnvironment), default: ApiKeyEnvironment.DEVELOPMENT },
+  environment: { type: String, default: 'DEVELOPMENT' },
   lastUsedAt: { type: Date }
 }, { timestamps: true });
 

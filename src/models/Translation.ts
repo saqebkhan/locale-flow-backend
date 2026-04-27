@@ -6,7 +6,7 @@ export interface ITranslation extends Document {
   namespace: string;
   key: string;
   value: string;
-  environment: 'DEV' | 'TEST' | 'PROD';
+  environment: string;
   status: 'DRAFT' | 'AI_SUGGESTED' | 'PENDING_APPROVAL' | 'APPROVED';
   isArchived: boolean;
   createdBy: mongoose.Types.ObjectId;
@@ -23,7 +23,7 @@ const TranslationSchema: Schema = new Schema({
   key: { type: String, required: true },
   value: { type: String, required: true },
   previousValue: { type: String },
-  environment: { type: String, enum: ['DEV', 'TEST', 'PROD'], default: 'DEV' },
+  environment: { type: String, default: 'DEVELOPMENT' },
   status: { type: String, enum: ['DRAFT', 'AI_SUGGESTED', 'PENDING_APPROVAL', 'APPROVED', 'REJECTED'], default: 'DRAFT' },
   isArchived: { type: Boolean, default: false },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
