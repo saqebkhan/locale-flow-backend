@@ -61,9 +61,9 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
     const key = keys.find(k => k.environment === env);
     if (!key) return { environment: env, status: 'EMPTY' };
 
-    const isProduction = env.toUpperCase() === 'PRODUCTION' || env.toUpperCase() === 'PROD';
-    // Non-admins can only see production-like keys if privileged
-    if (isProduction && !isPrivileged) {
+    const isRestricted = project.restrictedEnvironments?.includes(env);
+    // Non-admins can only see restricted keys if privileged
+    if (isRestricted && !isPrivileged) {
       return { 
         _id: key._id,
         environment: env, 
@@ -166,6 +166,30 @@ export const removeEnvironment = async (req: AuthRequest, res: Response) => {
   await ApiKey.deleteMany({ projectId, environment: name });
 
   res.json({ message: 'Environment removed', environments: project.environments });
+};
+
+export const toggleEnvironmentRestriction = async (req: AuthRequest, res: Response) => {
+  const { name } = req.params;
+  const projectId = req.params.id;
+  const { restrict } = req.body;
+
+  const project = await Project.findById(projectId);
+  if (!project) return res.status(404).json({ message: 'Project not found' });
+
+  if (!project.environments.includes(name)) {
+    return res.status(404).json({ message: 'Environment not found' });
+  }
+
+  const currentlyRestricted = project.restrictedEnvironments.includes(name);
+
+  if (restrict && !currentlyRestricted) {
+    project.restrictedEnvironments.push(name);
+  } else if (!restrict && currentlyRestricted) {
+    project.restrictedEnvironments = project.restrictedEnvironments.filter(e => e !== name);
+  }
+
+  await project.save();
+  res.json({ message: `Environment ${restrict ? 'restricted' : 'unrestricted'}`, restrictedEnvironments: project.restrictedEnvironments });
 };
 
 export const getProjectDetails = async (req: AuthRequest, res: Response) => {

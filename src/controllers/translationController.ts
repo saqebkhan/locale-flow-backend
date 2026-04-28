@@ -40,7 +40,8 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
     let requestedBy = undefined;
     let requestedAction = undefined;
 
-    if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    const isRestricted = project?.restrictedEnvironments?.includes(environment);
+    if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
       status = 'PENDING_APPROVAL';
       requestedBy = req.user!._id;
       requestedAction = 'CREATE';
@@ -97,8 +98,11 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  // Editors cannot delete PROD translations directly, but can request it
-  if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+  const project = await Project.findById(translation.projectId);
+  const isRestricted = project?.restrictedEnvironments?.includes(translation.environment);
+
+  // Editors cannot delete restricted translations directly, but can request it
+  if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
     const updated = await Translation.findByIdAndUpdate(req.params.id, { 
       status: 'PENDING_APPROVAL', 
       requestedBy: req.user!._id, 
@@ -106,7 +110,6 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
     }, { new: true }).populate('requestedBy', 'name email');
     
     // Trigger notification
-    const project = await Project.findById(translation.projectId);
     const ownerUser = await User.findById(project?.owner);
     if (ownerUser?.email) {
       sendApprovalEmail(ownerUser.email, project!, { ...translation.toObject(), value: '[REQUESTED DELETION]' } as any).catch(e => console.error('Delete request email failed:', e));
@@ -136,12 +139,15 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    // If Editor edits PROD, it goes back to PENDING_APPROVAL
+    const projectDoc = await Project.findById(translation.projectId);
+    const isRestricted = projectDoc?.restrictedEnvironments?.includes(translation.environment);
+
+    // If Editor edits restricted env, it goes back to PENDING_APPROVAL
     let status = translation.status;
     let requestedBy = translation.requestedBy;
     let requestedAction = translation.requestedAction;
 
-    if (translation.environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
       status = 'PENDING_APPROVAL';
       requestedBy = req.user!._id;
       requestedAction = 'UPDATE';
@@ -149,7 +155,6 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
       
       // Trigger email
       try {
-        const projectDoc = await Project.findById(translation.projectId);
         const ownerUser = await User.findById(projectDoc?.owner);
         if (ownerUser?.email) {
           sendApprovalEmail(ownerUser.email, projectDoc, { ...translation.toObject(), value }).catch(e => console.error('Email update failed:', e));
@@ -191,9 +196,12 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  // Block Editors from renaming in PROD for now
-  if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    return res.status(403).json({ message: 'Only Admins can rename keys in Production.' });
+  const project = await Project.findById(projectId);
+  const isRestricted = project?.restrictedEnvironments?.includes(environment);
+
+  // Block Editors from renaming in restricted envs for now
+  if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    return res.status(403).json({ message: 'Only Admins can rename keys in restricted environments.' });
   }
 
   const result = await Translation.updateMany(
@@ -213,8 +221,11 @@ export const deleteKey = async (req: AuthRequest, res: Response) => {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
-  // Editors cannot delete PROD keys directly, but can request it
-  if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+  const project = await Project.findById(projectId);
+  const isRestricted = project?.restrictedEnvironments?.includes(environment);
+
+  // Editors cannot delete keys in restricted envs directly, but can request it
+  if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
     const result = await Translation.updateMany(
       { projectId, key, environment },
       { 
@@ -226,7 +237,6 @@ export const deleteKey = async (req: AuthRequest, res: Response) => {
 
     if (result.modifiedCount > 0) {
       // Trigger notification
-      const project = await Project.findById(projectId);
       const ownerUser = await User.findById(project?.owner);
       if (ownerUser?.email) {
         sendApprovalEmail(ownerUser.email, project!, { key, language: 'All', value: '[REQUESTED KEY DELETION]' } as any).catch(e => console.error('Key delete request email failed:', e));
@@ -354,9 +364,10 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
       return res.status(403).json({ message: 'Forbidden: You do not have permissions to upload to this project' });
     }
 
-    // PROD Governance
+    // Restricted Governance
     let status = 'APPROVED';
-    if (environment === 'PROD' && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+    const isRestricted = project?.restrictedEnvironments?.includes(environment);
+    if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
       status = 'PENDING_APPROVAL';
     }
 

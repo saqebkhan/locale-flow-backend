@@ -6,6 +6,7 @@ export interface IProject extends Document {
   defaultLanguage: string;
   languages: string[];
   environments: string[];
+  restrictedEnvironments: string[];
   owner: mongoose.Types.ObjectId;
 }
 
@@ -15,6 +16,7 @@ const ProjectSchema: Schema = new Schema({
   defaultLanguage: { type: String, default: 'en' },
   languages: { type: [String], default: ['en'] },
   environments: { type: [String], default: ['DEVELOPMENT'] },
+  restrictedEnvironments: { type: [String], default: ['PRODUCTION', 'PROD'] },
   owner: { type: Schema.Types.ObjectId, ref: 'User', required: true }
 }, { timestamps: true });
 
