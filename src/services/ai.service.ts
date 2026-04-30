@@ -45,8 +45,15 @@ export const translateText = async (
   try {
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    const jsonText = response.text().trim().replace(/```json/g, '').replace(/```/g, '');
-    return JSON.parse(jsonText);
+    const rawText = response.text().trim();
+    
+    // Extract JSON even if the AI included conversational text or markdown blocks
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('AI returned an invalid response format');
+    }
+    
+    return JSON.parse(jsonMatch[0]);
   } catch (error: any) {
     console.error('AI Translation Error:', error);
     throw new Error('Failed to generate AI translation: ' + error.message);
