@@ -161,7 +161,7 @@ export const restoreTranslation = async (req: AuthRequest, res: Response) => {
 
 export const updateTranslation = async (req: AuthRequest, res: Response) => {
   try {
-    const { value } = req.body;
+    const { value, status: providedStatus } = req.body;
     const translation = await Translation.findById(req.params.id);
     if (!translation) return res.status(404).json({ message: 'Translation not found' });
 
@@ -189,7 +189,7 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
     }
 
     // If Editor edits restricted env, it goes back to PENDING_APPROVAL
-    let status = translation.status;
+    let status = providedStatus || translation.status;
     let requestedBy = translation.requestedBy;
     let requestedAction = translation.requestedAction;
 
