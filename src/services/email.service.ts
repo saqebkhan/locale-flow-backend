@@ -104,3 +104,74 @@ export const sendInvitationEmail = async (email: string, projectDetail: any, rol
 
   console.warn('⚠️ No email provider configured (SMTP or Resend).');
 };
+
+export const sendVerificationEmail = async (email: string, name: string, token: string) => {
+  const verifyLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/verify-email?token=${token}`;
+  const html = `
+    <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px; max-width: 600px;">
+      <h2 style="color: #6366f1;">Verify Your Email</h2>
+      <p>Hi ${name},</p>
+      <p>Welcome to <b>Locale Flow</b>! Please click the button below to verify your email address and get started.</p>
+      <a href="${verifyLink}" style="display: inline-block; background: #6366f1; color: white; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;">Verify Email</a>
+      <p style="color: #64748b; font-size: 12px;">If you didn't create an account, you can safely ignore this email.</p>
+    </div>
+  `;
+
+  const transporter = getTransporter();
+  if (transporter) {
+    return transporter.sendMail({
+      from: `"Locale Flow" <${FROM_EMAIL}>`,
+      to: email,
+      subject: `📧 Verify your email for Locale Flow`,
+      html
+    });
+  }
+
+  const resend = getResend();
+  if (resend) {
+    return resend.emails.send({
+      from: `Locale Flow <onboarding@resend.dev>`,
+      to: email,
+      subject: `📧 Verify your email for Locale Flow`,
+      html
+    });
+  }
+
+  console.warn('⚠️ No email provider configured (SMTP or Resend).');
+};
+
+export const sendPasswordResetEmail = async (email: string, name: string, token: string) => {
+  const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${token}`;
+  const html = `
+    <div style="font-family: sans-serif; padding: 20px; border: 1px solid #eee; border-radius: 10px; max-width: 600px;">
+      <h2 style="color: #ef4444;">Reset Your Password</h2>
+      <p>Hi ${name},</p>
+      <p>We received a request to reset your password for <b>Locale Flow</b>.</p>
+      <p>Click the button below to set a new password. This link will expire in 1 hour.</p>
+      <a href="${resetLink}" style="display: inline-block; background: #ef4444; color: white; padding: 12px 25px; border-radius: 8px; text-decoration: none; font-weight: bold; margin: 20px 0;">Reset Password</a>
+      <p style="color: #64748b; font-size: 12px;">If you didn't request this, you can safely ignore this email.</p>
+    </div>
+  `;
+
+  const transporter = getTransporter();
+  if (transporter) {
+    return transporter.sendMail({
+      from: `"Locale Flow" <${FROM_EMAIL}>`,
+      to: email,
+      subject: `🔒 Password Reset Request`,
+      html
+    });
+  }
+
+  const resend = getResend();
+  if (resend) {
+    return resend.emails.send({
+      from: `Locale Flow <onboarding@resend.dev>`,
+      to: email,
+      subject: `🔒 Password Reset Request`,
+      html
+    });
+  }
+
+  console.warn('⚠️ No email provider configured (SMTP or Resend).');
+};

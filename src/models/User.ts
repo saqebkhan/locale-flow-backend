@@ -6,6 +6,10 @@ export interface IUser extends Document {
   name: string;
   password?: string;
   role: 'ADMIN' | 'USER';
+  isVerified: boolean;
+  verificationToken?: string;
+  resetPasswordToken?: string;
+  resetPasswordExpires?: Date;
   comparePassword(password: string): Promise<boolean>;
 }
 
@@ -13,7 +17,11 @@ const UserSchema: Schema = new Schema({
   email: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['ADMIN', 'USER'], default: 'USER' }
+  role: { type: String, enum: ['ADMIN', 'USER'], default: 'USER' },
+  isVerified: { type: Boolean, default: false },
+  verificationToken: { type: String },
+  resetPasswordToken: { type: String },
+  resetPasswordExpires: { type: Date }
 }, { timestamps: true });
 
 UserSchema.pre<IUser>('save', async function() {

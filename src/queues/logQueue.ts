@@ -7,7 +7,7 @@ const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379'
 });
 
 connection.on('error', (err) => {
-  console.error('Redis connection error:', err.message);
+  // console.error('Redis connection error:', err.message);
 });
 
 
