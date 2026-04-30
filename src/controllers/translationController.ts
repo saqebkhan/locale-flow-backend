@@ -469,3 +469,19 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getProjectPendingStats = async (req: AuthRequest, res: Response) => {
+  try {
+    const { projectId } = req.params;
+    
+    // Count pending across ALL environments
+    const pendingCount = await Translation.countDocuments({
+      projectId,
+      status: 'PENDING_APPROVAL',
+      isArchived: false
+    });
+
+    res.json({ pendingCount });
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+};

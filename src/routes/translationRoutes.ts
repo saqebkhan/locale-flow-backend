@@ -12,13 +12,15 @@ import {
   restoreTranslation,
   approveTranslation,
   rejectTranslation,
-  bulkUpload
+  bulkUpload,
+  getProjectPendingStats
 } from '../controllers/translationController';
 
 const router = express.Router();
 
 router.post('/', createTranslation);
 router.get('/project/:projectId', getTranslationsForProject);
+router.get('/project/:projectId/pending-stats', getProjectPendingStats);
 router.put('/:id', updateTranslation);
 router.delete('/:id', deleteTranslation);
 router.put('/project/:projectId/key/:oldKey', updateKey);
