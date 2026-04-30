@@ -47,16 +47,33 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
       requestedAction = 'CREATE';
     }
 
-    const translation = await Translation.findOneAndUpdate(
-      { projectId, language, namespace, key, environment },
-      { value, status, updatedBy: req.user!._id, isArchived: false, requestedBy, requestedAction },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-
-    if (!translation.createdBy) {
-      translation.createdBy = req.user!._id;
-      await translation.save();
+    // Duplication Checks
+    const existingKey = await Translation.findOne({ projectId, language, namespace, key, environment, isArchived: false });
+    if (existingKey) {
+      return res.status(409).json({ message: `Key "${key}" already exists for ${language} in ${namespace}` });
     }
+
+    const existingValue = await Translation.findOne({ projectId, language, namespace, value, environment, isArchived: false });
+    if (existingValue) {
+      return res.status(409).json({ message: `Value "${value}" is already used by key "${existingValue.key}" for this language.` });
+    }
+
+    const translation = new Translation({
+      projectId,
+      language,
+      namespace,
+      key,
+      value,
+      environment,
+      status,
+      updatedBy: req.user!._id,
+      createdBy: req.user!._id,
+      isArchived: false,
+      requestedBy,
+      requestedAction
+    });
+
+    await translation.save();
 
     // Handle Approval Email (Non-blocking)
     if (status === 'PENDING_APPROVAL' && project) {
@@ -142,6 +159,21 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
     const projectDoc = await Project.findById(translation.projectId);
     const isRestricted = projectDoc?.restrictedEnvironments?.includes(translation.environment);
 
+    // Value Duplication Check
+    const existingValue = await Translation.findOne({ 
+      projectId: translation.projectId, 
+      language: translation.language, 
+      namespace: translation.namespace, 
+      value, 
+      environment: translation.environment,
+      isArchived: false,
+      _id: { $ne: req.params.id } 
+    });
+
+    if (existingValue) {
+      return res.status(409).json({ message: `The value "${value}" is already used by key "${existingValue.key}"` });
+    }
+
     // If Editor edits restricted env, it goes back to PENDING_APPROVAL
     let status = translation.status;
     let requestedBy = translation.requestedBy;
@@ -202,6 +234,12 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
   // Block Editors from renaming in restricted envs for now
   if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
     return res.status(403).json({ message: 'Only Admins can rename keys in restricted environments.' });
+  }
+
+  // Key Duplication Check
+  const existingKey = await Translation.findOne({ projectId, key: newKey, environment, isArchived: false });
+  if (existingKey) {
+    return res.status(409).json({ message: `Key "${newKey}" already exists in this environment.` });
   }
 
   const result = await Translation.updateMany(
@@ -372,10 +410,27 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
     }
 
     const results = [];
+    let skippedCount = 0;
+
     for (const [lang, keys] of Object.entries(data)) {
       if (typeof keys !== 'object') continue;
       
       for (const [key, value] of Object.entries(keys as object)) {
+        // Check for duplicate key/lang combo
+        const existing = await Translation.findOne({ projectId, language: lang, key, environment, isArchived: false });
+        
+        if (existing) {
+          skippedCount++;
+          continue;
+        }
+
+        // Check for duplicate value
+        const existingValue = await Translation.findOne({ projectId, language: lang, value, environment, isArchived: false });
+        if (existingValue) {
+          skippedCount++;
+          continue;
+        }
+
         const translation = await Translation.findOneAndUpdate(
           { projectId, language: lang, key, environment, namespace: 'common' },
           { value, status, updatedBy: req.user!._id, isArchived: false },
@@ -394,8 +449,6 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
       try {
         const ownerUser = await User.findById(project.owner);
         if (ownerUser?.email) {
-          // Just notify the owner that a bulk upload happened and needs review
-          // We can use a simplified version of sendApprovalEmail or a dedicated one
           sendApprovalEmail(ownerUser.email, project, { key: 'Multiple Keys (Bulk Upload)', language: 'Multiple', value: 'Bulk update batch' } as any)
             .catch(e => console.error('Bulk email failed:', e));
         }
@@ -404,7 +457,12 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    res.status(201).json({ message: `Successfully imported ${results.length} keys`, count: results.length, status });
+    res.status(201).json({ 
+      message: `Successfully imported ${results.length} keys. Skipped ${skippedCount} duplicates.`, 
+      count: results.length, 
+      skippedCount,
+      status 
+    });
   } catch (error: any) {
     console.error('Bulk Upload Error:', error);
     res.status(500).json({ message: error.message || 'Internal Server Error' });
