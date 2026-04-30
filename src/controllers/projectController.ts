@@ -281,22 +281,28 @@ export const getInvitation = async (req: express.Request, res: Response) => {
 
 export const joinByInvitation = async (req: express.Request, res: Response) => {
   const { token } = req.params;
-  const { password } = req.body;
+  const { name, password } = req.body;
   
   const invitation = await Invitation.findOne({ token, status: 'PENDING' });
   if (!invitation) {
     return res.status(404).json({ message: 'Invitation not found' });
   }
 
-  // Create user
+  // Create or Update user
   let user = await User.findOne({ email: invitation.email });
   if (!user) {
     user = await User.create({
       email: invitation.email,
-      password, // Note: User model should hash this in its pre-save hook
-      name: invitation.email.split('@')[0],
-      isVerified: true // Invited users are verified by default as they received the email
+      password,
+      name: name || invitation.email.split('@')[0],
+      isVerified: true
     });
+  } else {
+    // If user exists, update their password and mark as verified
+    user.password = password;
+    user.isVerified = true;
+    if (name) user.name = name;
+    await user.save();
   }
 
   // Add to project
