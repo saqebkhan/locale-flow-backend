@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import Translation from '../models/Translation';
@@ -473,14 +474,24 @@ export const getProjectPendingStats = async (req: AuthRequest, res: Response) =>
   try {
     const { projectId } = req.params;
     
-    // Count pending across ALL environments
-    const pendingCount = await Translation.countDocuments({
-      projectId,
-      status: 'PENDING_APPROVAL',
-      isArchived: false
-    });
+    const stats = await Translation.aggregate([
+      { 
+        $match: { 
+          projectId: new mongoose.Types.ObjectId(projectId), 
+          status: 'PENDING_APPROVAL',
+          isArchived: false 
+        } 
+      },
+      { $group: { _id: '$environment', count: { $sum: 1 } } }
+    ]);
 
-    res.json({ pendingCount });
+    const total = stats.reduce((acc, curr) => acc + curr.count, 0);
+    const byEnvironment = stats.reduce((acc, curr) => {
+      acc[curr._id] = curr.count;
+      return acc;
+    }, {} as Record<string, number>);
+
+    res.json({ total, byEnvironment });
   } catch (error: any) {
     res.status(500).json({ message: error.message });
   }
