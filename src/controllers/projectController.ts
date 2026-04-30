@@ -294,7 +294,8 @@ export const joinByInvitation = async (req: express.Request, res: Response) => {
     user = await User.create({
       email: invitation.email,
       password, // Note: User model should hash this in its pre-save hook
-      name: invitation.email.split('@')[0]
+      name: invitation.email.split('@')[0],
+      isVerified: true // Invited users are verified by default as they received the email
     });
   }
 
@@ -308,8 +309,8 @@ export const joinByInvitation = async (req: express.Request, res: Response) => {
   invitation.status = 'ACCEPTED';
   await invitation.save();
 
-  // Generate JWT for immediate login
-  const jwtToken = jwt.sign({ _id: user._id }, process.env.JWT_SECRET || 'secret');
+  // Generate JWT for immediate login (using 'id' to match protect middleware)
+  const jwtToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'secret');
   
   res.json({ 
     message: 'Welcome to the team!', 
