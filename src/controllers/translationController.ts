@@ -48,10 +48,23 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
       requestedAction = 'CREATE';
     }
 
-    // Duplication Checks
-    const existingKey = await Translation.findOne({ projectId, language, namespace, key, environment, isArchived: false });
-    if (existingKey) {
-      return res.status(409).json({ message: `Key "${key}" already exists for ${language} in ${namespace}` });
+    // Duplication Checks (Check for ANY record, including archived, to prevent E11000)
+    const existing = await Translation.findOne({ projectId, language, namespace, key, environment });
+    
+    if (existing) {
+      if (!existing.isArchived) {
+        return res.status(409).json({ message: `The key "${key}" already exists for ${language.toUpperCase()} in ${namespace}.` });
+      } else {
+        // Reactivate archived key
+        existing.value = value;
+        existing.status = status;
+        existing.isArchived = false;
+        existing.requestedBy = requestedBy;
+        existing.requestedAction = requestedAction;
+        existing.updatedBy = req.user!._id;
+        await existing.save();
+        return res.json(existing);
+      }
     }
 
     const existingValue = await Translation.findOne({ projectId, language, namespace, value, environment, isArchived: false });
@@ -333,8 +346,14 @@ export const approveTranslation = async (req: AuthRequest, res: Response) => {
   if (!translation) return res.status(404).json({ message: 'Not found' });
 
   const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
-  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-    return res.status(403).json({ message: 'Only Admins can approve' });
+  const project = await Project.findById(translation.projectId);
+  const isRestricted = project?.restrictedEnvironments?.includes(translation.environment);
+
+  // Owners/Admins can always approve. Editors can approve if environment is NOT restricted.
+  const canApprove = (membership?.role === 'OWNER' || membership?.role === 'ADMIN') || (!isRestricted && membership?.role === 'EDITOR');
+
+  if (!canApprove) {
+    return res.status(403).json({ message: 'Only Admins can approve in restricted environments.' });
   }
 
   if (translation.requestedAction === 'DELETE') {
