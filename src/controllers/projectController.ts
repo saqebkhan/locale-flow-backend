@@ -1,15 +1,17 @@
-import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
-import Project from '../models/Project';
-import User from '../models/User';
-import Invitation from '../models/Invitation';
-import ProjectMember from '../models/ProjectMember';
-import ApiKey, { ApiKeyPermission } from '../models/ApiKey';
-import { generateApiKey, decrypt, rotateApiKey } from '../services/apiKey.service';
-import { sendInvitationEmail } from '../services/email.service';
+import { Request, Response } from 'express';
+import { AuthRequest } from '../middleware/auth.js';
+import Project from '../models/Project.js';
+import User from '../models/User.js';
+import Invitation from '../models/Invitation.js';
+import ProjectMember from '../models/ProjectMember.js';
+import ApiKey from '../models/ApiKey.js';
+import { generateApiKey, decrypt, rotateApiKey } from '../services/apiKey.service.js';
+import { sendInvitationEmail } from '../services/email.service.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import express from 'express';
+import { ROLES, INVITATION_STATUS, API_KEY_STATUS, ENVIRONMENTS, API_KEY_PERMISSIONS } from '../constants/index.js';
+import { isPrivilegedRole } from '../utils/rbac.js';
+import { logger } from '../utils/logger.js';
 
 export const createProject = async (req: AuthRequest, res: Response) => {
   const { name, description, defaultLanguage } = req.body;
@@ -24,15 +26,15 @@ export const createProject = async (req: AuthRequest, res: Response) => {
   await ProjectMember.create({
     projectId: project._id,
     userId: req.user!._id,
-    role: 'OWNER'
+    role: ROLES.OWNER
   });
 
   // Automatically generate an initial development read-only key
   const { rawKey } = await generateApiKey(
     project._id as string,
     'Initial Development Key',
-    ApiKeyPermission.READ_ONLY,
-    'DEVELOPMENT'
+    API_KEY_PERMISSIONS.READ_ONLY,
+    ENVIRONMENTS.DEVELOPMENT
   );
 
   res.status(201).json({ project, initialApiKey: rawKey });
@@ -48,18 +50,18 @@ export const getProjects = async (req: AuthRequest, res: Response) => {
 export const getProjectKeys = async (req: AuthRequest, res: Response) => {
   const projectId = req.params.id;
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  const isPrivileged = requesterMembership && (requesterMembership.role === 'OWNER' || requesterMembership.role === 'ADMIN');
+  const isPrivileged = requesterMembership && (requesterMembership.role === ROLES.OWNER || requesterMembership.role === ROLES.ADMIN);
 
   // We want to return a status for EACH environment in the project
   const project = await Project.findById(projectId);
   if (!project) return res.status(404).json({ message: 'Project not found' });
 
-  const environments = project.environments || ['DEVELOPMENT'];
+  const environments = project.environments || [ENVIRONMENTS.DEVELOPMENT];
   const keys = await ApiKey.find({ projectId }).select('-keyHash');
   
   const response = environments.map(env => {
     const key = keys.find(k => k.environment === env);
-    if (!key) return { environment: env, status: 'EMPTY' };
+    if (!key) return { environment: env, status: API_KEY_STATUS.EMPTY };
 
     const isRestricted = project.restrictedEnvironments?.includes(env);
     // Non-admins can only see restricted keys if privileged
@@ -68,7 +70,7 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
         _id: key._id,
         environment: env, 
         name: key.name, 
-        status: 'RESTRICTED',
+        status: API_KEY_STATUS.RESTRICTED,
         key: '•••••••••••••••• (Admin Only)'
       };
     }
@@ -84,14 +86,14 @@ export const getProjectKeys = async (req: AuthRequest, res: Response) => {
       }
     }
     delete keyObj.encryptedKey;
-    return { ...keyObj, status: 'ACTIVE' };
+    return { ...keyObj, status: API_KEY_STATUS.ACTIVE };
   });
 
   res.json(response);
 };
 
 export const createNewKey = async (req: AuthRequest, res: Response) => {
-  const { environment, permission = ApiKeyPermission.READ_ONLY } = req.body;
+  const { environment, permission = API_KEY_PERMISSIONS.READ_ONLY } = req.body;
   const projectId = req.params.id;
   const project = await Project.findById(projectId);
   if (!project) return res.status(404).json({ message: 'Project not found' });
@@ -147,7 +149,7 @@ export const removeEnvironment = async (req: AuthRequest, res: Response) => {
   const { name } = req.params;
   const projectId = req.params.id;
 
-  if (name === 'DEVELOPMENT') {
+  if (name === ENVIRONMENTS.DEVELOPMENT) {
     return res.status(400).json({ message: 'Cannot delete the default DEVELOPMENT environment' });
   }
 
@@ -230,7 +232,7 @@ export const inviteMember = async (req: AuthRequest, res: Response) => {
     await sendInvitationEmail(email, project, role, token);
     res.status(201).json({ message: 'Invitation sent', invitation });
   } catch (error: any) {
-    console.error('Failed to send invitation email:', error);
+    logger.error('Failed to send invitation email:', error);
     res.status(500).json({ 
       message: 'Invitation recorded but email failed: ' + (error.message || 'Unknown error'),
       invitation 
@@ -245,7 +247,7 @@ export const getProjectMembers = async (req: AuthRequest, res: Response) => {
 
 export const acceptInvitation = async (req: AuthRequest, res: Response) => {
   const { token } = req.params;
-  const invitation = await Invitation.findOne({ token, status: 'PENDING' });
+  const invitation = await Invitation.findOne({ token, status: INVITATION_STATUS.PENDING });
 
   if (!invitation) {
     return res.status(404).json({ message: 'Invitation not found or already processed' });
@@ -262,15 +264,15 @@ export const acceptInvitation = async (req: AuthRequest, res: Response) => {
   });
 
   // Update invitation status
-  invitation.status = 'ACCEPTED';
+  invitation.status = INVITATION_STATUS.ACCEPTED;
   await invitation.save();
 
   res.json({ message: 'Invitation accepted', projectId: invitation.projectId });
 };
 
-export const getInvitation = async (req: express.Request, res: Response) => {
+export const getInvitation = async (req: Request, res: Response) => {
   const { token } = req.params;
-  const invitation = await Invitation.findOne({ token, status: 'PENDING' }).populate('projectId', 'name');
+  const invitation = await Invitation.findOne({ token, status: INVITATION_STATUS.PENDING }).populate('projectId', 'name');
 
   if (!invitation) {
     return res.status(404).json({ message: 'Invitation not found or already processed' });
@@ -279,11 +281,11 @@ export const getInvitation = async (req: express.Request, res: Response) => {
   res.json(invitation);
 };
 
-export const joinByInvitation = async (req: express.Request, res: Response) => {
+export const joinByInvitation = async (req: Request, res: Response) => {
   const { token } = req.params;
   const { name, password } = req.body;
   
-  const invitation = await Invitation.findOne({ token, status: 'PENDING' });
+  const invitation = await Invitation.findOne({ token, status: INVITATION_STATUS.PENDING });
   if (!invitation) {
     return res.status(404).json({ message: 'Invitation not found' });
   }
@@ -312,7 +314,7 @@ export const joinByInvitation = async (req: express.Request, res: Response) => {
     role: invitation.role
   });
 
-  invitation.status = 'ACCEPTED';
+  invitation.status = INVITATION_STATUS.ACCEPTED;
   await invitation.save();
 
   // Generate JWT for immediate login (using 'id' to match protect middleware)
@@ -331,7 +333,7 @@ export const updateMemberRole = async (req: AuthRequest, res: Response) => {
 
   // RBAC Check: Only Admin/Owner can change roles
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+  if (!requesterMembership || !isPrivilegedRole(requesterMembership.role)) {
     return res.status(403).json({ message: 'Forbidden: Only Admins can change roles' });
   }
 
@@ -346,14 +348,14 @@ export const removeMember = async (req: AuthRequest, res: Response) => {
 
   // RBAC Check: Only Admin/Owner can remove members
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+  if (!requesterMembership || !isPrivilegedRole(requesterMembership.role)) {
     return res.status(403).json({ message: 'Forbidden: Only Admins can remove members' });
   }
 
   const member = await ProjectMember.findById(memberId);
   if (!member) return res.status(404).json({ message: 'Member not found' });
 
-  if (member.role === 'OWNER') {
+  if (member.role === ROLES.OWNER) {
     return res.status(400).json({ message: 'Cannot remove the project owner' });
   }
 
@@ -366,7 +368,7 @@ export const deleteApiKey = async (req: AuthRequest, res: Response) => {
 
   // RBAC Check
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+  if (!requesterMembership || !isPrivilegedRole(requesterMembership.role)) {
     return res.status(403).json({ message: 'Forbidden: Only Admins can delete API keys' });
   }
 
@@ -381,7 +383,7 @@ export const rotateKey = async (req: AuthRequest, res: Response) => {
 
   // RBAC Check
   const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  if (!requesterMembership || (requesterMembership.role !== 'OWNER' && requesterMembership.role !== 'ADMIN')) {
+  if (!requesterMembership || !isPrivilegedRole(requesterMembership.role)) {
     return res.status(403).json({ message: 'Forbidden: Only Admins can rotate API keys' });
   }
 

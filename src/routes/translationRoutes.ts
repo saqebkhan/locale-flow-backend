@@ -14,7 +14,7 @@ import {
   rejectTranslation,
   bulkUpload,
   getProjectPendingStats
-} from '../controllers/translationController';
+} from '../controllers/translationController.js';
 
 const router = express.Router();
 

@@ -1,9 +1,10 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { ROLES } from '../constants/index.js';
 
 export interface IProjectMember extends Document {
   projectId: mongoose.Types.ObjectId;
   userId: mongoose.Types.ObjectId;
-  role: 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
+  role: typeof ROLES[keyof typeof ROLES];
 }
 
 const ProjectMemberSchema: Schema = new Schema({
@@ -11,8 +12,8 @@ const ProjectMemberSchema: Schema = new Schema({
   userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   role: { 
     type: String, 
-    enum: ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'], 
-    default: 'EDITOR' 
+    enum: Object.values(ROLES), 
+    default: ROLES.EDITOR 
   }
 }, { timestamps: true });
 

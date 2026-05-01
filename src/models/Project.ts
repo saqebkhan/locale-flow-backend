@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose';
+import { ENVIRONMENTS, DEFAULT_LANGUAGE } from '../constants/index.js';
 
 export interface IProject extends Document {
   name: string;
@@ -13,10 +14,10 @@ export interface IProject extends Document {
 const ProjectSchema: Schema = new Schema({
   name: { type: String, required: true },
   description: { type: String },
-  defaultLanguage: { type: String, default: 'en' },
-  languages: { type: [String], default: ['en'] },
-  environments: { type: [String], default: ['DEVELOPMENT'] },
-  restrictedEnvironments: { type: [String], default: ['PRODUCTION', 'PROD'] },
+  defaultLanguage: { type: String, default: DEFAULT_LANGUAGE },
+  languages: { type: [String], default: [DEFAULT_LANGUAGE] },
+  environments: { type: [String], default: [ENVIRONMENTS.DEVELOPMENT] },
+  restrictedEnvironments: { type: [String], default: [ENVIRONMENTS.PRODUCTION, ENVIRONMENTS.PROD] },
   owner: { type: Schema.Types.ObjectId, ref: 'User', required: true }
 }, { timestamps: true });
 

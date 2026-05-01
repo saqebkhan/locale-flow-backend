@@ -5,17 +5,18 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
-import { apiLimiter, sdkLimiter } from './middleware/rateLimiter';
-import { apiKeyProtect } from './middleware/apiKeyAuth';
-import { protect } from './middleware/auth';
-import { setCacheHeaders } from './middleware/cacheHeaders';
+import { apiLimiter, sdkLimiter } from './middleware/rateLimiter.js';
+import { apiKeyProtect } from './middleware/apiKeyAuth.js';
+import { protect } from './middleware/auth.js';
+import { setCacheHeaders } from './middleware/cacheHeaders.js';
+import { timingMiddleware } from './middleware/timing.js';
 
 // Routes
-import authRoutes from './routes/authRoutes';
-import projectRoutes from './routes/projectRoutes';
-import sdkRoutes from './routes/sdkRoutes';
-import translationRoutes from './routes/translationRoutes';
-import invitationRoutes from './routes/invitationRoutes';
+import authRoutes from './routes/authRoutes.js';
+import projectRoutes from './routes/projectRoutes.js';
+import sdkRoutes from './routes/sdkRoutes.js';
+import translationRoutes from './routes/translationRoutes.js';
+import invitationRoutes from './routes/invitationRoutes.js';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use(cors({
 }));
 app.use(morgan('dev'));
 app.use(express.json());
+app.use(timingMiddleware);
 
 // Dashboard APIs
 app.use('/api/auth', authRoutes);

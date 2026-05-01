@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey';
+import ApiKey, { ApiKeyPermission, ApiKeyEnvironment } from '../models/ApiKey.js';
 
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || 'v-p-p-s-e-c-r-e-t-k-e-y-3-2-chars';
 const IV_LENGTH = 16;

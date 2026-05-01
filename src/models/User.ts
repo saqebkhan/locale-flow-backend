@@ -1,11 +1,12 @@
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { SYSTEM_ROLES } from '../constants/index.js';
 
 export interface IUser extends Document {
   email: string;
   name: string;
   password?: string;
-  role: 'ADMIN' | 'USER';
+  role: typeof SYSTEM_ROLES[keyof typeof SYSTEM_ROLES];
   isVerified: boolean;
   verificationToken?: string;
   resetPasswordToken?: string;
@@ -17,7 +18,7 @@ const UserSchema: Schema = new Schema({
   email: { type: String, required: true, unique: true },
   name: { type: String, required: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['ADMIN', 'USER'], default: 'USER' },
+  role: { type: String, enum: Object.values(SYSTEM_ROLES), default: SYSTEM_ROLES.USER },
   isVerified: { type: Boolean, default: false },
   verificationToken: { type: String },
   resetPasswordToken: { type: String },

@@ -1,6 +1,6 @@
 import express from 'express';
-import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers, acceptInvitation, updateMemberRole, removeMember, deleteApiKey, rotateKey, addEnvironment, removeEnvironment, toggleEnvironmentRestriction } from '../controllers/projectController';
-import { protect } from '../middleware/auth';
+import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers, acceptInvitation, updateMemberRole, removeMember, deleteApiKey, rotateKey, addEnvironment, removeEnvironment, toggleEnvironmentRestriction } from '../controllers/projectController.js';
+import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
 

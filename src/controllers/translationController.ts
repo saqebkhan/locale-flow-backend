@@ -1,17 +1,21 @@
 import mongoose from 'mongoose';
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth';
-import Translation from '../models/Translation';
-import Project from '../models/Project';
-import ProjectMember from '../models/ProjectMember';
-import User from '../models/User';
-import { createSnapshot, rollbackToVersion } from '../services/versioning.service';
-import { translateText } from '../services/ai.service';
-import { sendApprovalEmail } from '../services/email.service';
+import { AuthRequest } from '../middleware/auth.js';
+import Translation from '../models/Translation.js';
+import Project from '../models/Project.js';
+import ProjectMember from '../models/ProjectMember.js';
+import User from '../models/User.js';
+import { createSnapshot, rollbackToVersion } from '../services/versioning.service.js';
+import { translateText } from '../services/ai.service.js';
+import { sendApprovalEmail } from '../services/email.service.js';
+import { cacheService } from '../services/cache.service.js';
+import { ROLES, TRANSLATION_STATUS, REQUEST_ACTIONS, ENVIRONMENTS } from '../constants/index.js';
+import { resolveEffectiveMembership, isPrivilegedRole } from '../utils/rbac.js';
+import { logger } from '../utils/logger.js';
 
 export const createTranslation = async (req: AuthRequest, res: Response) => {
   try {
-    const { projectId, language, namespace, key, value, environment = 'DEV', status: providedStatus } = req.body;
+    const { projectId, language, namespace, key, value, environment = ENVIRONMENTS.DEVELOPMENT, status: providedStatus } = req.body;
     
     if (!projectId || !key || !language) {
       return res.status(400).json({ message: 'Project ID, Key, and Language are required' });
@@ -22,30 +26,25 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
     }
 
     // RBAC Check
-    let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-    const project = await Project.findById(projectId);
-    
-    if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
-      membership = { role: 'OWNER' } as any;
-    }
+    const { membership, project } = await resolveEffectiveMembership(projectId, req.user!._id.toString());
 
     if (!membership) return res.status(403).json({ message: 'Forbidden: You do not have access to this project' });
 
     // 1. VIEWER Restriction
-    if (membership.role === 'VIEWER') {
+    if (membership.role === ROLES.VIEWER) {
       return res.status(403).json({ message: 'Viewers cannot modify translations' });
     }
 
     // 2. PROD Governance for EDITOR
-    let status = providedStatus || 'APPROVED';
+    let status = providedStatus || TRANSLATION_STATUS.APPROVED;
     let requestedBy = undefined;
     let requestedAction = undefined;
 
     const isRestricted = project?.restrictedEnvironments?.includes(environment);
-    if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-      status = 'PENDING_APPROVAL';
+    if (isRestricted && !isPrivilegedRole(membership.role)) {
+      status = TRANSLATION_STATUS.PENDING_APPROVAL;
       requestedBy = req.user!._id;
-      requestedAction = 'CREATE';
+      requestedAction = REQUEST_ACTIONS.CREATE;
     }
 
     // Duplication Checks (Check for ANY record, including archived, to prevent E11000)
@@ -63,6 +62,8 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
         existing.requestedAction = requestedAction;
         existing.updatedBy = req.user!._id;
         await existing.save();
+        
+        await cacheService.invalidatePattern(`sdk:${projectId}:${environment}`);
         return res.json(existing);
       }
     }
@@ -88,16 +89,17 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
     });
 
     await translation.save();
+    await cacheService.invalidatePattern(`sdk:${projectId}:${environment}`);
 
     // Handle Approval Email (Non-blocking)
-    if (status === 'PENDING_APPROVAL' && project) {
+    if (status === TRANSLATION_STATUS.PENDING_APPROVAL && project) {
       try {
         const ownerUser = await User.findById(project.owner);
         if (ownerUser?.email) {
-          sendApprovalEmail(ownerUser.email, project, translation).catch(e => console.error('Email failed:', e));
+          sendApprovalEmail(ownerUser.email, project, translation).catch(e => logger.error('Email failed:', e));
         }
       } catch (e) {
-        console.error('Failed to trigger approval email:', e);
+        logger.error('Failed to trigger approval email:', e);
       }
     }
 
@@ -105,18 +107,20 @@ export const createTranslation = async (req: AuthRequest, res: Response) => {
 
     return res.status(201).json(translation);
   } catch (error: any) {
-    console.error('Create Translation Error:', error);
+    logger.error('Create Translation Error:', error);
     return res.status(500).json({ message: error.message || 'Internal Server Error' });
   }
 };
 
 export const getTranslationsForProject = async (req: AuthRequest, res: Response) => {
-  const { environment = 'DEV' } = req.query;
+  const { environment = ENVIRONMENTS.DEVELOPMENT } = req.query;
   const translations = await Translation.find({ 
     projectId: req.params.projectId,
     environment,
     isArchived: false
-  }).populate('requestedBy', 'name email');
+  })
+  .populate('requestedBy', 'name email')
+  .lean();
   res.json(translations);
 };
 
@@ -125,7 +129,7 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
   if (!translation) return res.status(404).json({ message: 'Not found' });
 
   const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
-  if (!membership || membership.role === 'VIEWER') {
+  if (!membership || membership.role === ROLES.VIEWER) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -133,17 +137,17 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
   const isRestricted = project?.restrictedEnvironments?.includes(translation.environment);
 
   // Editors cannot delete restricted translations directly, but can request it
-  if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+  if (isRestricted && !isPrivilegedRole(membership.role)) {
     const updated = await Translation.findByIdAndUpdate(req.params.id, { 
-      status: 'PENDING_APPROVAL', 
+      status: TRANSLATION_STATUS.PENDING_APPROVAL, 
       requestedBy: req.user!._id, 
-      requestedAction: 'DELETE' 
+      requestedAction: REQUEST_ACTIONS.DELETE 
     }, { new: true }).populate('requestedBy', 'name email');
     
     // Trigger notification
     const ownerUser = await User.findById(project?.owner);
     if (ownerUser?.email) {
-      sendApprovalEmail(ownerUser.email, project!, { ...translation.toObject(), value: '[REQUESTED DELETION]' } as any).catch(e => console.error('Delete request email failed:', e));
+      sendApprovalEmail(ownerUser.email, project!, { ...translation.toObject(), value: '[REQUESTED DELETION]' } as any).catch(e => logger.error('Delete request email failed:', e));
     }
     
     return res.status(200).json(updated);
@@ -151,11 +155,13 @@ export const deleteTranslation = async (req: AuthRequest, res: Response) => {
 
   // Soft delete for others
   await Translation.findByIdAndUpdate(req.params.id, { isArchived: true });
+  await cacheService.invalidatePattern(`sdk:${translation.projectId}:${translation.environment}`);
   res.status(204).send();
 };
 
 export const restoreTranslation = async (req: AuthRequest, res: Response) => {
-  await Translation.findByIdAndUpdate(req.params.id, { isArchived: false });
+  const t = await Translation.findByIdAndUpdate(req.params.id, { isArchived: false });
+  if (t) await cacheService.invalidatePattern(`sdk:${t.projectId}:${t.environment}`);
   res.status(200).json({ message: 'Restored' });
 };
 
@@ -166,7 +172,7 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
     if (!translation) return res.status(404).json({ message: 'Translation not found' });
 
     const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
-    if (!membership || membership.role === 'VIEWER') {
+    if (!membership || membership.role === ROLES.VIEWER) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
@@ -193,20 +199,20 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
     let requestedBy = translation.requestedBy;
     let requestedAction = translation.requestedAction;
 
-    if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-      status = 'PENDING_APPROVAL';
+    if (isRestricted && !isPrivilegedRole(membership.role)) {
+      status = TRANSLATION_STATUS.PENDING_APPROVAL;
       requestedBy = req.user!._id;
-      requestedAction = 'UPDATE';
+      requestedAction = REQUEST_ACTIONS.UPDATE;
       const previousValue = translation.value; // Store current for possible revert
       
       // Trigger email
       try {
         const ownerUser = await User.findById(projectDoc?.owner);
         if (ownerUser?.email) {
-          sendApprovalEmail(ownerUser.email, projectDoc, { ...translation.toObject(), value }).catch(e => console.error('Email update failed:', e));
+          sendApprovalEmail(ownerUser.email, projectDoc, { ...translation.toObject(), value }).catch(e => logger.error('Email update failed:', e));
         }
       } catch (e) {
-        console.error('Failed to trigger update approval email:', e);
+        logger.error('Failed to trigger update approval email:', e);
       }
       
       const updated = await Translation.findByIdAndUpdate(
@@ -214,6 +220,7 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
         { value, status, updatedBy: req.user!._id, requestedBy, requestedAction, previousValue },
         { new: true }
       ).populate('requestedBy', 'name email');
+      if (updated) await cacheService.invalidatePattern(`sdk:${updated.projectId}:${updated.environment}`);
       return res.json(updated);
     }
 
@@ -222,10 +229,11 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
       { value, status, updatedBy: req.user!._id },
       { new: true }
     );
+    if (updated) await cacheService.invalidatePattern(`sdk:${updated.projectId}:${updated.environment}`);
 
     res.json(updated);
   } catch (error: any) {
-    console.error('Update Translation Error:', error);
+    logger.error('Update Translation Error:', error);
     res.status(500).json({ message: error.message || 'Internal Server Error' });
   }
 };
@@ -233,12 +241,12 @@ export const updateTranslation = async (req: AuthRequest, res: Response) => {
 export const updateKey = async (req: AuthRequest, res: Response) => {
   const { projectId, oldKey } = req.params;
   const { newKey } = req.body;
-  const { environment = 'DEV' } = req.query;
+  const { environment = ENVIRONMENTS.DEVELOPMENT } = req.query;
   
   if (!newKey) return res.status(400).json({ message: 'New key name is required' });
 
   const membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  if (!membership || membership.role === 'VIEWER') {
+  if (!membership || membership.role === ROLES.VIEWER) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -246,7 +254,7 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
   const isRestricted = project?.restrictedEnvironments?.includes(environment);
 
   // Block Editors from renaming in restricted envs for now
-  if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+  if (isRestricted && !isPrivilegedRole(membership.role)) {
     return res.status(403).json({ message: 'Only Admins can rename keys in restricted environments.' });
   }
 
@@ -261,15 +269,17 @@ export const updateKey = async (req: AuthRequest, res: Response) => {
     { key: newKey, updatedBy: req.user!._id }
   );
 
+  await cacheService.invalidatePattern(`sdk:${projectId}:${environment}`);
+
   res.json({ message: `Updated ${result.modifiedCount} translations`, modifiedCount: result.modifiedCount });
 };
 
 export const deleteKey = async (req: AuthRequest, res: Response) => {
   const { projectId, key } = req.params;
-  const { environment = 'DEV' } = req.query;
+  const { environment = ENVIRONMENTS.DEVELOPMENT } = req.query;
 
   const membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-  if (!membership || membership.role === 'VIEWER') {
+  if (!membership || membership.role === ROLES.VIEWER) {
     return res.status(403).json({ message: 'Forbidden' });
   }
 
@@ -277,13 +287,13 @@ export const deleteKey = async (req: AuthRequest, res: Response) => {
   const isRestricted = project?.restrictedEnvironments?.includes(environment);
 
   // Editors cannot delete keys in restricted envs directly, but can request it
-  if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+  if (isRestricted && !isPrivilegedRole(membership.role)) {
     const result = await Translation.updateMany(
       { projectId, key, environment },
       { 
-        status: 'PENDING_APPROVAL', 
+        status: TRANSLATION_STATUS.PENDING_APPROVAL, 
         requestedBy: req.user!._id, 
-        requestedAction: 'DELETE' 
+        requestedAction: REQUEST_ACTIONS.DELETE 
       }
     );
 
@@ -291,7 +301,7 @@ export const deleteKey = async (req: AuthRequest, res: Response) => {
       // Trigger notification
       const ownerUser = await User.findById(project?.owner);
       if (ownerUser?.email) {
-        sendApprovalEmail(ownerUser.email, project!, { key, language: 'All', value: '[REQUESTED KEY DELETION]' } as any).catch(e => console.error('Key delete request email failed:', e));
+        sendApprovalEmail(ownerUser.email, project!, { key, language: 'All', value: '[REQUESTED KEY DELETION]' } as any).catch(e => logger.error('Key delete request email failed:', e));
       }
     }
 
@@ -302,6 +312,7 @@ export const deleteKey = async (req: AuthRequest, res: Response) => {
   }
   
   const result = await Translation.deleteMany({ projectId, key, environment });
+  await cacheService.invalidatePattern(`sdk:${projectId}:${environment}`);
 
   res.json({ message: `Deleted ${result.deletedCount} translations`, deletedCount: result.deletedCount });
 };
@@ -350,21 +361,22 @@ export const approveTranslation = async (req: AuthRequest, res: Response) => {
   const isRestricted = project?.restrictedEnvironments?.includes(translation.environment);
 
   // Owners/Admins can always approve. Editors can approve if environment is NOT restricted.
-  const canApprove = (membership?.role === 'OWNER' || membership?.role === 'ADMIN') || (!isRestricted && membership?.role === 'EDITOR');
+  const canApprove = (membership?.role === ROLES.OWNER || membership?.role === ROLES.ADMIN) || (!isRestricted && membership?.role === ROLES.EDITOR);
 
   if (!canApprove) {
     return res.status(403).json({ message: 'Only Admins can approve in restricted environments.' });
   }
 
-  if (translation.requestedAction === 'DELETE') {
+  if (translation.requestedAction === REQUEST_ACTIONS.DELETE) {
     translation.isArchived = true;
   }
   
-  translation.status = 'APPROVED';
+  translation.status = TRANSLATION_STATUS.APPROVED;
   translation.requestedBy = undefined;
   translation.requestedAction = undefined;
   translation.updatedBy = req.user!._id;
   await translation.save();
+  await cacheService.invalidatePattern(`sdk:${translation.projectId}:${translation.environment}`);
   res.json(translation);
 };
 
@@ -374,7 +386,7 @@ export const rejectTranslation = async (req: AuthRequest, res: Response) => {
   if (!translation) return res.status(404).json({ message: 'Not found' });
 
   const membership = await ProjectMember.findOne({ projectId: translation.projectId, userId: req.user!._id });
-  if (!membership || (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
+  if (!membership || !isPrivilegedRole(membership.role)) {
     return res.status(403).json({ message: 'Only Admins can reject' });
   }
 
@@ -382,13 +394,13 @@ export const rejectTranslation = async (req: AuthRequest, res: Response) => {
     translation.isArchived = true;
   } else {
     // Revert logic
-    if (translation.requestedAction === 'UPDATE' && translation.previousValue) {
+    if (translation.requestedAction === REQUEST_ACTIONS.UPDATE && translation.previousValue) {
       translation.value = translation.previousValue;
-      translation.status = 'APPROVED';
-    } else if (translation.requestedAction === 'DELETE') {
-      translation.status = 'APPROVED'; // Cancel deletion
+      translation.status = TRANSLATION_STATUS.APPROVED;
+    } else if (translation.requestedAction === REQUEST_ACTIONS.DELETE) {
+      translation.status = TRANSLATION_STATUS.APPROVED; // Cancel deletion
     } else {
-      translation.status = 'REJECTED'; // New translation rejected
+      translation.status = TRANSLATION_STATUS.REJECTED; // New translation rejected
     }
   }
 
@@ -397,13 +409,14 @@ export const rejectTranslation = async (req: AuthRequest, res: Response) => {
   translation.previousValue = undefined;
   translation.updatedBy = req.user!._id;
   await translation.save();
+  await cacheService.invalidatePattern(`sdk:${translation.projectId}:${translation.environment}`);
   
   const populated = await Translation.findById(translation._id).populate('requestedBy', 'name email');
   res.json(populated || translation);
 };
 
 export const bulkUpload = async (req: AuthRequest, res: Response) => {
-  const { projectId, data, environment = 'DEV' } = req.body;
+  const { projectId, data, environment = ENVIRONMENTS.DEVELOPMENT } = req.body;
   
   if (!data || typeof data !== 'object') {
     return res.status(400).json({ message: 'Invalid JSON data' });
@@ -411,22 +424,17 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
 
   try {
     // RBAC Check
-    let membership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
-    const project = await Project.findById(projectId);
-    
-    if (!membership && project?.owner?.toString() === req.user!._id.toString()) {
-      membership = { role: 'OWNER' } as any;
-    }
+    const { membership, project } = await resolveEffectiveMembership(projectId, req.user!._id.toString());
 
-    if (!membership || membership.role === 'VIEWER') {
+    if (!membership || membership.role === ROLES.VIEWER) {
       return res.status(403).json({ message: 'Forbidden: You do not have permissions to upload to this project' });
     }
 
     // Restricted Governance
-    let status = 'APPROVED';
+    let status = TRANSLATION_STATUS.APPROVED;
     const isRestricted = project?.restrictedEnvironments?.includes(environment);
-    if (isRestricted && (membership.role !== 'OWNER' && membership.role !== 'ADMIN')) {
-      status = 'PENDING_APPROVAL';
+    if (isRestricted && !isPrivilegedRole(membership.role)) {
+      status = TRANSLATION_STATUS.PENDING_APPROVAL;
     }
 
     const results = [];
@@ -465,16 +473,20 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
     }
 
     // Trigger one notification for the whole batch if pending
-    if (status === 'PENDING_APPROVAL' && project) {
+    if (status === TRANSLATION_STATUS.PENDING_APPROVAL && project) {
       try {
         const ownerUser = await User.findById(project.owner);
         if (ownerUser?.email) {
           sendApprovalEmail(ownerUser.email, project, { key: 'Multiple Keys (Bulk Upload)', language: 'Multiple', value: 'Bulk update batch' } as any)
-            .catch(e => console.error('Bulk email failed:', e));
+            .catch(e => logger.error('Bulk email failed:', e));
         }
       } catch (e) {
-        console.error('Failed to trigger bulk approval email:', e);
+        logger.error('Failed to trigger bulk approval email:', e);
       }
+    }
+
+    if (results.length > 0) {
+      await cacheService.invalidatePattern(`sdk:${projectId}:${environment}`);
     }
 
     res.status(201).json({ 
@@ -484,7 +496,7 @@ export const bulkUpload = async (req: AuthRequest, res: Response) => {
       status 
     });
   } catch (error: any) {
-    console.error('Bulk Upload Error:', error);
+    logger.error('Bulk Upload Error:', error);
     res.status(500).json({ message: error.message || 'Internal Server Error' });
   }
 };
@@ -497,7 +509,7 @@ export const getProjectPendingStats = async (req: AuthRequest, res: Response) =>
       { 
         $match: { 
           projectId: new mongoose.Types.ObjectId(projectId), 
-          status: 'PENDING_APPROVAL',
+          status: TRANSLATION_STATUS.PENDING_APPROVAL,
           isArchived: false 
         } 
       },

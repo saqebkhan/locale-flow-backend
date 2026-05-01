@@ -1,6 +1,5 @@
-import Translation from '../models/Translation';
-import TranslationSnapshot from '../models/TranslationSnapshot';
-import { getTranslations } from './translation.service';
+import Translation from '../models/Translation.js';
+import TranslationSnapshot from '../models/TranslationSnapshot.js';
 
 export const createSnapshot = async (projectId: string, version: string, userId: string) => {
   // Fetch all translations for the project
@@ -8,7 +7,7 @@ export const createSnapshot = async (projectId: string, version: string, userId:
   
   // Group by language and namespace
   const data: any = {};
-  translations.forEach(t => {
+  translations.forEach((t: any) => {
     if (!data[t.language]) data[t.language] = {};
     if (!data[t.language][t.namespace]) data[t.language][t.namespace] = {};
     data[t.language][t.namespace][t.key] = t.value;

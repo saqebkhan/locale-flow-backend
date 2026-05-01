@@ -1,6 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { translate } from 'google-translate-api-x';
 import dotenv from 'dotenv';
+import { logger } from '../utils/logger.js';
 
 dotenv.config();
 
@@ -13,7 +14,7 @@ export const translateText = async (
 ): Promise<{ [key: string]: string }> => {
   // Fallback to free key-less translation if no API key is provided
   if (!process.env.GEMINI_API_KEY) {
-    console.log('No GEMINI_API_KEY found. Using free fallback translation...');
+    logger.info('No GEMINI_API_KEY found. Using free fallback translation...');
     const results: { [key: string]: string } = {};
     
     await Promise.all(targetLanguages.map(async (lang) => {
@@ -21,7 +22,7 @@ export const translateText = async (
         const res = await translate(text, { to: lang, from: sourceLanguage });
         results[lang] = res.text;
       } catch (err) {
-        console.error(`Fallback translation failed for ${lang}:`, err);
+        logger.error(`Fallback translation failed for ${lang}:`, err);
         results[lang] = `[Translation Error]`;
       }
     }));
@@ -55,22 +56,22 @@ export const translateText = async (
     
     return JSON.parse(jsonMatch[0]);
   } catch (error: any) {
-    console.error('AI Translation Error:', error);
+    logger.error('AI Translation Error:', error);
     throw new Error('Failed to generate AI translation: ' + error.message);
   }
 };
 
 // --- Test Block ---
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('ai.service.ts')) {
-  console.log('Testing Gemini AI Integration...');
+  logger.info('Testing Gemini AI Integration...');
   translateText('Hello world, welcome to our amazing translation platform!', ['fr', 'es', 'de'])
     .then(res => {
-      console.log('✅ AI Translation Working!');
-      console.log(JSON.stringify(res, null, 2));
+      logger.info('✅ AI Translation Working!');
+      logger.info(JSON.stringify(res, null, 2));
     })
     .catch(err => {
-      console.error('❌ AI Translation Failed!');
-      console.error(err.message);
-      console.log('\nTip: Make sure GEMINI_API_KEY is set in backend/.env');
+      logger.error('❌ AI Translation Failed!');
+      logger.error(err.message);
+      logger.info('\nTip: Make sure GEMINI_API_KEY is set in backend/.env');
     });
 }

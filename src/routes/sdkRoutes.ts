@@ -1,5 +1,5 @@
 import express from 'express';
-import { fetchTranslations, reportMissingKeys, getProjectConfig } from '../controllers/sdkController';
+import { fetchTranslations, reportMissingKeys, getProjectConfig } from '../controllers/sdkController.js';
 
 const router = express.Router();
 

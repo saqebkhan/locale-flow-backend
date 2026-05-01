@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import User from '../models/User';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email.service';
+import User from '../models/User.js';
+import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email.service.js';
 
 const generateToken = (id: string) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'secret', { expiresIn: '30d' });
@@ -19,7 +19,6 @@ export const registerUser = async (req: Request, res: Response) => {
     }
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
-    console.log('Generating user with token:', verificationToken);
     const user = await User.create({ 
       email, 
       password, 
@@ -28,7 +27,6 @@ export const registerUser = async (req: Request, res: Response) => {
     });
 
     if (user) {
-      console.log('User created in DB:', user._id, 'isVerified:', user.isVerified, 'token:', user.verificationToken);
       await sendVerificationEmail(user.email, user.name, verificationToken);
       
       res.status(201).json({

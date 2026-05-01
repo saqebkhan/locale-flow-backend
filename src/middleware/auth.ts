@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import User, { IUser } from '../models/User';
+import User, { IUser } from '../models/User.js';
+import { SYSTEM_ROLES } from '../constants/index.js';
 
 export interface AuthRequest extends Request {
   user?: IUser;
@@ -29,7 +30,7 @@ export const protect = async (req: AuthRequest, res: Response, next: NextFunctio
 };
 
 export const admin = (req: AuthRequest, res: Response, next: NextFunction) => {
-  if (req.user && req.user.role === 'ADMIN') {
+  if (req.user && req.user.role === SYSTEM_ROLES.ADMIN) {
     next();
   } else {
     res.status(403).json({ message: 'Not authorized as an admin' });

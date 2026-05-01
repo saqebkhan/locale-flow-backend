@@ -1,9 +1,11 @@
 import { Response } from 'express';
-import { ApiKeyRequest } from '../middleware/apiKeyAuth';
-import { getTranslationsWithFallback } from '../services/translation.service';
-import TranslationSnapshot from '../models/TranslationSnapshot';
-import Project from '../models/Project';
-import { logQueue } from '../queues/logQueue';
+import { ApiKeyRequest } from '../middleware/apiKeyAuth.js';
+import { getTranslationsWithFallback } from '../services/translation.service.js';
+import TranslationSnapshot from '../models/TranslationSnapshot.js';
+import Project from '../models/Project.js';
+import { logQueue } from '../queues/logQueue.js';
+import { logger } from '../utils/logger.js';
+import { DEFAULT_LANGUAGE } from '../constants/index.js';
 
 export const fetchTranslations = async (req: ApiKeyRequest, res: Response) => {
   const { lang, namespace, version } = req.query;
@@ -19,7 +21,7 @@ export const fetchTranslations = async (req: ApiKeyRequest, res: Response) => {
   try {
     const translations = await getTranslationsWithFallback(
       projectId.toString(),
-      (lang as string) || 'en',
+      (lang as string) || DEFAULT_LANGUAGE,
       req.apiKey.environment,
       namespace as string
     );
@@ -45,7 +47,7 @@ export const reportMissingKeys = async (req: ApiKeyRequest, res: Response) => {
       try {
         await logQueue.add('reportMissing', { projectId, language: lang, key });
       } catch (err) {
-        console.error('Failed to add to logQueue:', err);
+        logger.error('Failed to add to logQueue:', err);
         // Continue regardless of queue failure
       }
     }
