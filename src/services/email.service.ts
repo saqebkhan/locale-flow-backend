@@ -155,19 +155,7 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
   `;
 
   try {
-    // 1. Try Resend first (usually more reliable for production/deployed apps)
-    const resend = getResend();
-    if (resend) {
-      logger.info(`Attempting to send password reset email to ${email} via Resend...`);
-      return await resend.emails.send({
-        from: `Locale Flow <onboarding@resend.dev>`,
-        to: email,
-        subject: `🔒 Password Reset Request`,
-        html
-      });
-    }
-
-    // 2. Fallback to SMTP
+    // 1. Try SMTP first (to use saqebk619@gmail.com as sender)
     const transporter = getTransporter();
     if (transporter) {
       logger.info(`Attempting to send password reset email to ${email} via SMTP...`);
@@ -179,9 +167,38 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
       });
     }
 
+    // 2. Fallback to Resend
+    const resend = getResend();
+    if (resend) {
+      logger.info(`Attempting to send password reset email to ${email} via Resend...`);
+      return await resend.emails.send({
+        from: `Locale Flow <onboarding@resend.dev>`,
+        to: email,
+        subject: `🔒 Password Reset Request`,
+        html
+      });
+    }
+
     logger.warn('⚠️ No email provider configured (SMTP or Resend). Password reset email not sent.');
   } catch (error: any) {
     logger.error(`Failed to send password reset email to ${email}:`, error);
+    
+    // Final attempt: If SMTP failed, try Resend immediately as a last resort
+    // We only do this if we haven't already successfully sent it
+    const resend = getResend();
+    if (resend) { 
+      try {
+        logger.info(`Primary method failed, trying emergency fallback to Resend for ${email}...`);
+        return await resend.emails.send({
+          from: `Locale Flow <onboarding@resend.dev>`,
+          to: email,
+          subject: `🔒 Password Reset Request`,
+          html
+        });
+      } catch (innerError) {
+        logger.error(`Emergency Resend fallback also failed for ${email}`);
+      }
+    }
     throw error;
   }
 };
