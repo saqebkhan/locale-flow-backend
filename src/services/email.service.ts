@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer';
 import { Resend } from 'resend';
+import { logger } from '../utils/logger.js';
 
 // Helper to get SMTP transporter
 const getTransporter = () => {
@@ -153,25 +154,32 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
     </div>
   `;
 
-  const transporter = getTransporter();
-  if (transporter) {
-    return transporter.sendMail({
-      from: `"Locale Flow" <${FROM_EMAIL}>`,
-      to: email,
-      subject: `🔒 Password Reset Request`,
-      html
-    });
-  }
+  try {
+    const transporter = getTransporter();
+    if (transporter) {
+      logger.info(`Attempting to send password reset email to ${email} via SMTP...`);
+      return await transporter.sendMail({
+        from: `"Locale Flow" <${FROM_EMAIL}>`,
+        to: email,
+        subject: `🔒 Password Reset Request`,
+        html
+      });
+    }
 
-  const resend = getResend();
-  if (resend) {
-    return resend.emails.send({
-      from: `Locale Flow <onboarding@resend.dev>`,
-      to: email,
-      subject: `🔒 Password Reset Request`,
-      html
-    });
-  }
+    const resend = getResend();
+    if (resend) {
+      logger.info(`Attempting to send password reset email to ${email} via Resend...`);
+      return await resend.emails.send({
+        from: `Locale Flow <onboarding@resend.dev>`,
+        to: email,
+        subject: `🔒 Password Reset Request`,
+        html
+      });
+    }
 
-  console.warn('⚠️ No email provider configured (SMTP or Resend).');
+    logger.warn('⚠️ No email provider configured (SMTP or Resend). Password reset email not sent.');
+  } catch (error: any) {
+    logger.error(`Failed to send password reset email to ${email}:`, error);
+    throw error; // Rethrow to be caught by the non-blocking caller's .catch()
+  }
 };

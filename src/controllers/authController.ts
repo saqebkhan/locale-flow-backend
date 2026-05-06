@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import User from '../models/User.js';
 import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email.service.js';
+import { logger } from '../utils/logger.js';
 
 const generateToken = (id: string) => {
   return jwt.sign({ id }, process.env.JWT_SECRET || 'secret', { expiresIn: '30d' });
@@ -89,8 +90,16 @@ export const verifyEmail = async (req: Request, res: Response) => {
 export const forgotPassword = async (req: Request, res: Response) => {
   const { email } = req.body;
 
+  if (!email || typeof email !== 'string') {
+    return res.status(400).json({ message: 'Please provide a valid email address.' });
+  }
+
   try {
-    const user = await User.findOne({ email });
+    // Escape regex special characters to prevent SyntaxError and NoSQL injection
+    const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Case-insensitive search using escaped string
+    const user = await User.findOne({ email: new RegExp(`^${escapedEmail}$`, 'i') });
 
     if (!user) {
       // For security reasons, don't reveal that the user doesn't exist
@@ -102,11 +111,19 @@ export const forgotPassword = async (req: Request, res: Response) => {
     user.resetPasswordExpires = new Date(Date.now() + 3600000); // 1 hour
     await user.save();
 
-    await sendPasswordResetEmail(user.email, user.name, resetToken);
+    // Log for development
+    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${resetToken}`;
+    logger.info(`[DEV] Password reset link for ${email}: ${resetLink}`);
+
+    // Send email asynchronously to avoid blocking the response and prevent timeouts
+    sendPasswordResetEmail(user.email, user.name, resetToken).catch(error => {
+      logger.error(`Failed to send password reset email to ${email}:`, error);
+    });
 
     res.json({ message: 'If an account exists with that email, a reset link has been sent.' });
   } catch (error: any) {
-    res.status(500).json({ message: error.message });
+    logger.error(`Error in forgotPassword for ${email}:`, error);
+    res.status(500).json({ message: 'An internal error occurred. Please try again later.' });
   }
 };
 
