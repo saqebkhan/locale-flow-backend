@@ -4,13 +4,16 @@ import { logger } from '../utils/logger.js';
 // Helper to get SMTP transporter
 const getTransporter = () => {
   if (process.env.SMTP_USER && process.env.SMTP_PASS) {
-    // Using 'service: gmail' is the most reliable way for personal Gmail accounts
     return nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // Use STARTTLS
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
+      // IMPORTANT: Force IPv4 to avoid the 'ENETUNREACH' error on Render/IPv6 networks
+      family: 4 
     });
   }
   return null;
