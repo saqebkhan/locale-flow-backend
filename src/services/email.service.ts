@@ -3,11 +3,10 @@ import { logger } from '../utils/logger.js';
 
 // Helper to get SMTP transporter
 const getTransporter = () => {
-  if (process.env.SMTP_HOST && process.env.SMTP_USER) {
+  if (process.env.SMTP_USER && process.env.SMTP_PASS) {
+    // Using 'service: gmail' is the most reliable way for personal Gmail accounts
     return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
+      service: 'gmail',
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -18,6 +17,18 @@ const getTransporter = () => {
 };
 
 const FROM_EMAIL = process.env.SMTP_USER;
+
+// Verify connection configuration on startup
+const transporter = getTransporter();
+if (transporter) {
+  transporter.verify((error, success) => {
+    if (error) {
+      logger.error('❌ Gmail SMTP Verification Failed:', error);
+    } else {
+      logger.info('✅ Gmail SMTP Server is ready to take our messages');
+    }
+  });
+}
 
 export const sendApprovalEmail = async (adminEmail: string, projectDetail: any, translation: any) => {
   if (!projectDetail?._id || !translation?._id) {
