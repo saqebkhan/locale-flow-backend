@@ -1,5 +1,4 @@
 import nodemailer from 'nodemailer';
-import { Resend } from 'resend';
 import { logger } from '../utils/logger.js';
 
 // Helper to get SMTP transporter
@@ -18,13 +17,7 @@ const getTransporter = () => {
   return null;
 };
 
-// Helper to get Resend instance
-const getResend = () => {
-  if (!process.env.RESEND_API_KEY) return null;
-  return new Resend(process.env.RESEND_API_KEY);
-};
-
-const FROM_EMAIL = process.env.SMTP_USER || 'onboarding@resend.dev';
+const FROM_EMAIL = process.env.SMTP_USER;
 
 export const sendApprovalEmail = async (adminEmail: string, projectDetail: any, translation: any) => {
   if (!projectDetail?._id || !translation?._id) {
@@ -46,7 +39,7 @@ export const sendApprovalEmail = async (adminEmail: string, projectDetail: any, 
     </div>
   `;
 
-  // 1. Try SMTP (Gmail)
+  // Try SMTP (Gmail)
   const transporter = getTransporter();
   if (transporter) {
     return transporter.sendMail({
@@ -57,18 +50,7 @@ export const sendApprovalEmail = async (adminEmail: string, projectDetail: any, 
     });
   }
 
-  // 2. Fallback to Resend
-  const resend = getResend();
-  if (resend) {
-    return resend.emails.send({
-      from: `Locale Flow <onboarding@resend.dev>`,
-      to: adminEmail,
-      subject: `⚠️ Approval Required: "${translation.key}"`,
-      html
-    });
-  }
-
-  console.warn('⚠️ No email provider configured (SMTP or Resend).');
+  logger.warn('⚠️ SMTP not configured. Approval email not sent.');
 };
 
 export const sendInvitationEmail = async (email: string, projectDetail: any, role: string, token: string) => {
@@ -81,7 +63,7 @@ export const sendInvitationEmail = async (email: string, projectDetail: any, rol
     </div>
   `;
 
-  // 1. Try SMTP (Gmail)
+  // Try SMTP (Gmail)
   const transporter = getTransporter();
   if (transporter) {
     return transporter.sendMail({
@@ -92,18 +74,7 @@ export const sendInvitationEmail = async (email: string, projectDetail: any, rol
     });
   }
 
-  // 2. Fallback to Resend
-  const resend = getResend();
-  if (resend) {
-    return resend.emails.send({
-      from: `Locale Flow <onboarding@resend.dev>`,
-      to: email,
-      subject: `🚀 Join the team at "${projectDetail.name}"`,
-      html
-    });
-  }
-
-  console.warn('⚠️ No email provider configured (SMTP or Resend).');
+  logger.warn('⚠️ SMTP not configured. Invitation email not sent.');
 };
 
 export const sendVerificationEmail = async (email: string, name: string, token: string) => {
@@ -128,17 +99,7 @@ export const sendVerificationEmail = async (email: string, name: string, token: 
     });
   }
 
-  const resend = getResend();
-  if (resend) {
-    return resend.emails.send({
-      from: `Locale Flow <onboarding@resend.dev>`,
-      to: email,
-      subject: `📧 Verify your email for Locale Flow`,
-      html
-    });
-  }
-
-  console.warn('⚠️ No email provider configured (SMTP or Resend).');
+  logger.warn('⚠️ SMTP not configured. Verification email not sent.');
 };
 
 export const sendPasswordResetEmail = async (email: string, name: string, token: string) => {
@@ -155,10 +116,9 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
   `;
 
   try {
-    // 1. Try SMTP first (to use saqebk619@gmail.com as sender)
     const transporter = getTransporter();
     if (transporter) {
-      logger.info(`Attempting to send password reset email to ${email} via SMTP...`);
+      logger.info(`Attempting to send password reset email to ${email} via Gmail SMTP...`);
       return await transporter.sendMail({
         from: `"Locale Flow" <${FROM_EMAIL}>`,
         to: email,
@@ -167,38 +127,9 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
       });
     }
 
-    // 2. Fallback to Resend
-    const resend = getResend();
-    if (resend) {
-      logger.info(`Attempting to send password reset email to ${email} via Resend...`);
-      return await resend.emails.send({
-        from: `Locale Flow <onboarding@resend.dev>`,
-        to: email,
-        subject: `🔒 Password Reset Request`,
-        html
-      });
-    }
-
-    logger.warn('⚠️ No email provider configured (SMTP or Resend). Password reset email not sent.');
+    logger.warn('⚠️ SMTP not configured. Password reset email not sent.');
   } catch (error: any) {
     logger.error(`Failed to send password reset email to ${email}:`, error);
-    
-    // Final attempt: If SMTP failed, try Resend immediately as a last resort
-    // We only do this if we haven't already successfully sent it
-    const resend = getResend();
-    if (resend) { 
-      try {
-        logger.info(`Primary method failed, trying emergency fallback to Resend for ${email}...`);
-        return await resend.emails.send({
-          from: `Locale Flow <onboarding@resend.dev>`,
-          to: email,
-          subject: `🔒 Password Reset Request`,
-          html
-        });
-      } catch (innerError) {
-        logger.error(`Emergency Resend fallback also failed for ${email}`);
-      }
-    }
     throw error;
   }
 };
