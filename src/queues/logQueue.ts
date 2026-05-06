@@ -4,10 +4,22 @@ import MissingTranslation from '../models/MissingTranslation';
 
 const connection = new IORedis(process.env.REDIS_URL || 'redis://localhost:6379', {
   maxRetriesPerRequest: null,
+  lazyConnect: true, // Don't connect immediately
+  enableOfflineQueue: false, // Don't queue commands if offline
+  retryStrategy: (times) => {
+    if (times > 3) {
+      // Stop retrying after 3 attempts in development
+      return null;
+    }
+    return Math.min(times * 100, 3000);
+  }
 });
 
 connection.on('error', (err) => {
-  // console.error('Redis connection error:', err.message);
+  // Only log if it's not a connection refused error, or log it once
+  if (err.code !== 'ECONNREFUSED') {
+    console.error('Redis Error:', err.message);
+  }
 });
 
 

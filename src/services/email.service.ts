@@ -155,17 +155,7 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
   `;
 
   try {
-    const transporter = getTransporter();
-    if (transporter) {
-      logger.info(`Attempting to send password reset email to ${email} via SMTP...`);
-      return await transporter.sendMail({
-        from: `"Locale Flow" <${FROM_EMAIL}>`,
-        to: email,
-        subject: `🔒 Password Reset Request`,
-        html
-      });
-    }
-
+    // 1. Try Resend first (usually more reliable for production/deployed apps)
     const resend = getResend();
     if (resend) {
       logger.info(`Attempting to send password reset email to ${email} via Resend...`);
@@ -177,9 +167,21 @@ export const sendPasswordResetEmail = async (email: string, name: string, token:
       });
     }
 
+    // 2. Fallback to SMTP
+    const transporter = getTransporter();
+    if (transporter) {
+      logger.info(`Attempting to send password reset email to ${email} via SMTP...`);
+      return await transporter.sendMail({
+        from: `"Locale Flow" <${FROM_EMAIL}>`,
+        to: email,
+        subject: `🔒 Password Reset Request`,
+        html
+      });
+    }
+
     logger.warn('⚠️ No email provider configured (SMTP or Resend). Password reset email not sent.');
   } catch (error: any) {
     logger.error(`Failed to send password reset email to ${email}:`, error);
-    throw error; // Rethrow to be caught by the non-blocking caller's .catch()
+    throw error;
   }
 };
