@@ -1,15 +1,15 @@
-import { Request, Response } from 'express';
-import { AuthRequest } from '../middleware/auth.js';
 import Project from '../models/Project.js';
+import MissingTranslation from '../models/MissingTranslation.js';
 import User from '../models/User.js';
 import Invitation from '../models/Invitation.js';
 import ProjectMember from '../models/ProjectMember.js';
 import ApiKey from '../models/ApiKey.js';
+import Translation from '../models/Translation.js';
 import { generateApiKey, decrypt, rotateApiKey } from '../services/apiKey.service.js';
 import { sendInvitationEmail } from '../services/email.service.js';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import { ROLES, INVITATION_STATUS, API_KEY_STATUS, ENVIRONMENTS, API_KEY_PERMISSIONS } from '../constants/index.js';
+import { ROLES, INVITATION_STATUS, API_KEY_STATUS, ENVIRONMENTS, API_KEY_PERMISSIONS, TRANSLATION_STATUS, REQUEST_ACTIONS } from '../constants/index.js';
 import { isPrivilegedRole } from '../utils/rbac.js';
 import { logger } from '../utils/logger.js';
 
@@ -392,5 +392,131 @@ export const rotateKey = async (req: AuthRequest, res: Response) => {
     res.json({ rawKey, apiKey });
   } catch (err: any) {
     res.status(400).json({ message: err.message });
+  }
+};
+export const getContentGaps = async (req: AuthRequest, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    const languages = project.languages;
+    
+    // Find all translations for this project
+    const translations = await Translation.find({ projectId, isArchived: false });
+    
+    // Group by key
+    const keyGroups: Record<string, string[]> = {};
+    translations.forEach(t => {
+      if (!keyGroups[t.key]) keyGroups[t.key] = [];
+      keyGroups[t.key].push(t.language);
+    });
+
+    const gaps: any[] = [];
+    
+    // For each key group, check which languages are missing
+    Object.entries(keyGroups).forEach(([key, presentLangs]) => {
+      const missingLangs = languages.filter(l => !presentLangs.includes(l));
+      if (missingLangs.length > 0) {
+        gaps.push({
+          key,
+          missingLanguages: missingLangs,
+          presentCount: presentLangs.length,
+          totalRequired: languages.length
+        });
+      }
+    });
+
+    res.json(gaps);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const getMissingKeys = async (req: AuthRequest, res: Response) => {
+  try {
+    const projectId = req.params.id;
+    const missingKeys = await MissingTranslation.find({ projectId })
+      .sort({ count: -1 }) // Most frequent first
+      .limit(50);
+    res.json(missingKeys);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+};
+export const getKeyMissingEnvironments = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id: projectId } = req.params;
+    const { key, namespace } = req.query;
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    // Find environments where this key exists
+    const existingEnvs = await Translation.distinct('environment', {
+      projectId,
+      key,
+      namespace,
+      isArchived: false
+    });
+
+    const missingEnvs = project.environments.filter(env => !existingEnvs.includes(env));
+    res.json(missingEnvs);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const duplicateKeyToEnvironment = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id: projectId } = req.params;
+    const { key, namespace, sourceEnv, targetEnv } = req.body;
+
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    if (!project.environments.includes(targetEnv)) {
+      return res.status(400).json({ message: 'Target environment does not exist in project' });
+    }
+
+    const requesterMembership = await ProjectMember.findOne({ projectId, userId: req.user!._id });
+    const isRestrictedTarget = project.restrictedEnvironments?.includes(targetEnv);
+    const isEditor = requesterMembership?.role === ROLES.EDITOR;
+    const forcePending = isRestrictedTarget && isEditor;
+
+    // Get translations from source env
+    const sourceTranslations = await Translation.find({
+      projectId,
+      key,
+      namespace,
+      environment: sourceEnv,
+      isArchived: false
+    });
+
+    if (sourceTranslations.length === 0) {
+      return res.status(404).json({ message: 'No translations found in source environment' });
+    }
+
+    // Prepare duplicates for target env
+    const duplicates = sourceTranslations.map(t => {
+      const obj = t.toObject();
+      delete obj._id;
+      delete obj.createdAt;
+      delete obj.updatedAt;
+      
+      const newStatus = forcePending ? TRANSLATION_STATUS.PENDING_APPROVAL : t.status;
+      
+      return {
+        ...obj,
+        environment: targetEnv,
+        status: newStatus,
+        requestedAction: forcePending ? REQUEST_ACTIONS.CREATE : undefined,
+        requestedBy: forcePending ? req.user!._id : undefined
+      };
+    });
+
+    await Translation.insertMany(duplicates);
+    res.json({ message: `Successfully duplicated ${duplicates.length} translations to ${targetEnv}` });
+  } catch (err: any) {
+    res.status(500).json({ message: err.message });
   }
 };

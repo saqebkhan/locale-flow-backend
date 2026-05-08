@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
-import ApiKey from '../models/ApiKey';
+import ApiKey from '../models/ApiKey.js';
 
 export interface ApiKeyRequest extends Request {
   apiKey?: any;

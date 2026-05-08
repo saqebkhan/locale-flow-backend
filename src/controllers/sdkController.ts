@@ -4,6 +4,7 @@ import { getTranslationsWithFallback } from '../services/translation.service.js'
 import TranslationSnapshot from '../models/TranslationSnapshot.js';
 import Project from '../models/Project.js';
 import { logQueue } from '../queues/logQueue.js';
+import MissingTranslation from '../models/MissingTranslation.js';
 import { logger } from '../utils/logger.js';
 import { DEFAULT_LANGUAGE } from '../constants/index.js';
 
@@ -42,13 +43,31 @@ export const reportMissingKeys = async (req: ApiKeyRequest, res: Response) => {
   const { lang, keys } = req.body;
   const projectId = req.apiKey.projectId;
 
+  console.log(`[SDK] Missing Key Report received for Project: ${projectId}`);
+  console.log(`[SDK] Keys to report: ${JSON.stringify(keys)}`);
+
   if (Array.isArray(keys)) {
     for (const key of keys) {
       try {
-        await logQueue.add('reportMissing', { projectId, language: lang, key });
+        console.log(`[SDK] Attempting to queue/save key: ${key}`);
+        // Try background queue first for performance
+        await logQueue.add('reportMissing', { projectId, language: lang, key }, {
+          attempts: 1,
+          removeOnComplete: true
+        });
       } catch (err) {
-        logger.error('Failed to add to logQueue:', err);
-        // Continue regardless of queue failure
+        // FALLBACK: Direct Save if Redis is down (Common in local dev)
+        console.log(`[SDK] Queue failed, falling back to direct save for: ${key}`);
+        try {
+          const result = await MissingTranslation.findOneAndUpdate(
+            { projectId, language: lang || DEFAULT_LANGUAGE, key },
+            { $inc: { count: 1 }, lastSeenAt: new Date() },
+            { upsert: true, new: true }
+          );
+          console.log(`[SDK] Direct save successful: ${result?.key} (Count: ${result?.count})`);
+        } catch (dbErr) {
+          console.error('[SDK] Failed to save missing key even with direct fallback:', dbErr);
+        }
       }
     }
   }

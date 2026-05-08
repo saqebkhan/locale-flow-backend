@@ -1,5 +1,5 @@
 import express from 'express';
-import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers, acceptInvitation, updateMemberRole, removeMember, deleteApiKey, rotateKey, addEnvironment, removeEnvironment, toggleEnvironmentRestriction } from '../controllers/projectController.js';
+import { createProject, getProjects, getProjectKeys, createNewKey, getProjectDetails, updateProject, inviteMember, getProjectMembers, acceptInvitation, updateMemberRole, removeMember, deleteApiKey, rotateKey, addEnvironment, removeEnvironment, toggleEnvironmentRestriction, getMissingKeys, getContentGaps, getKeyMissingEnvironments, duplicateKeyToEnvironment } from '../controllers/projectController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -15,6 +15,10 @@ router.get('/:id/keys', protect, getProjectKeys);
 router.post('/:id/keys', protect, createNewKey);
 router.delete('/:id/keys/:keyId', protect, deleteApiKey);
 router.post('/:id/keys/:keyId/rotate', protect, rotateKey);
+router.get('/:id/missing-keys', protect, getMissingKeys);
+router.get('/:id/content-gaps', protect, getContentGaps);
+router.get('/:id/key-missing-envs', protect, getKeyMissingEnvironments);
+router.post('/:id/duplicate-key', protect, duplicateKeyToEnvironment);
 
 // Member Management
 router.put('/:id/members/:memberId', protect, updateMemberRole);
